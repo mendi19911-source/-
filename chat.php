@@ -59,8 +59,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     $ltext = strtolower($text);
 
-    // עסקאות
-    if (strpos($ltext, 'עסק') !== false || strpos($ltext, 'סטטוס') !== false || strpos($ltext, 'מה קורה') !== false || strpos($text, 'שלום') !== false || strpos($text, 'היי') !== false || strpos($text, 'hi') !== false || strpos($text, 'hello') !== false) {
+    // חבילות — בדוק קודם
+    if (strpos($text, 'חבילה') !== false || strpos($text, 'חבילות') !== false || strpos($text, 'מחיר') !== false) {
+        $r2 = crmGet('get-packages');
+        $pkgs = $r2['data'] ?? [];
+        if (empty($pkgs)) {
+            echo json_encode(['reply' => 'לא נמצאו חבילות.'], JSON_UNESCAPED_UNICODE);
+            exit;
+        }
+        $out = "📦 חבילות זמינות:\n\n";
+        foreach (array_slice($pkgs, 0, 10) as $p) {
+            $pname = $p['name'] ?? $p['title'] ?? '';
+            $cost  = $p['cost'] ?? '';
+            $out .= "• $pname";
+            if ($cost) $out .= " — ₪$cost";
+            $out .= "\n";
+        }
+        echo json_encode(['reply' => $out], JSON_UNESCAPED_UNICODE);
+        exit;
+    }
+
+    // ברירת מחדל — תמיד הצג עסקאות
+    if (true) {
         if (empty($deals)) {
             echo json_encode(['reply' => "📋 $name — אין עסקאות כרגע."], JSON_UNESCAPED_UNICODE);
             exit;
@@ -93,34 +113,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         exit;
     }
 
-    // חבילות
-    if (strpos($ltext, 'חבילה') !== false || strpos($ltext, 'חבילות') !== false) {
-        $r2 = crmGet('get-packages');
-        $pkgs = $r2['data'] ?? [];
-        if (empty($pkgs)) {
-            echo json_encode(['reply' => 'לא נמצאו חבילות.'], JSON_UNESCAPED_UNICODE);
-            exit;
-        }
-        $out = "📦 חבילות זמינות:\n\n";
-        foreach (array_slice($pkgs, 0, 10) as $p) {
-            $pname = $p['name'] ?? $p['title'] ?? '';
-            $cost  = $p['cost'] ?? '';
-            $out .= "• $pname";
-            if ($cost) $out .= " — ₪$cost";
-            $out .= "\n";
-        }
-        echo json_encode(['reply' => $out], JSON_UNESCAPED_UNICODE);
-        exit;
-    }
-
-    // ברירת מחדל
+    // ברירת מחדל — פרטי חנות + עסקאות
     $out = "🏪 $name";
     if ($city) $out .= " | $city";
     $out .= "\n";
     if ($uphone) $out .= "📱 $uphone\n";
     if ($email) $out .= "✉️ $email\n";
     $out .= "\nיש " . count($deals) . " עסקאות.\n\n";
-    $out .= "מה תרצה?\n• עסקאות — לראות עסקאות וסטטוסים\n• חבילות — חבילות למכירה";
+    $out .= "כתוב:\n• **עסקאות** — לפרטים מלאים\n• **חבילות** — חבילות למכירה";
     echo json_encode(['reply' => $out], JSON_UNESCAPED_UNICODE);
     exit;
 }
@@ -161,7 +161,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
   </div>
   <div class="phone-bar">
     <label>📱 מספר חנות:</label>
-    <input type="tel" id="phone" placeholder="0509089908" value="0509089908">
+    <input type="tel" id="phone" placeholder="0544951010" value="0544951010">
   </div>
   <div class="messages" id="messages">
     <div class="bubble bot">שלום! אני הבוט של אול אין 👋<br><br>אני יכול לעזור לך עם:<br>• <b>עסקאות</b> — רשימת עסקאות וסטטוסים<br>• <b>חבילות</b> — חבילות זמינות למכירה<br><br>פשוט כתוב מה תרצה לדעת.</div>
