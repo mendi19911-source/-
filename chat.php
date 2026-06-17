@@ -88,8 +88,8 @@ if ($_SERVER['REQUEST_METHOD']==='POST') {
         $newState = 'idle';
     }
 
-    // ── בדיקת חברה ────────────────────────────────────────
-    elseif (has($text,['באיזו חברה','איזה חברה','איזו חברה','ספק של','באיזה ספק'])) {
+    // ── בדיקת חברה (מפעיל) ───────────────────────────────
+    elseif (has($text,['באיזו חברה','איזה חברה','איזו חברה','ספק של','באיזה ספק','מפעיל','באיזה מפעיל','חברת תקשורת'])) {
         preg_match('/05\d{8}/',$text,$m);
         if (!$m) {
             $reply    = "בשמחה! 👍 איזה מספר תרצה לבדוק?";
@@ -103,9 +103,39 @@ if ($_SERVER['REQUEST_METHOD']==='POST') {
     // ── ממתין למספר (checkProvider) ───────────────────────
     elseif ($state==='wait_provider') {
         preg_match('/05\d{8}/',$text,$m);
-        $qphone   = $m[0] ?? $text;
+        $qphone   = $m[0] ?? preg_replace('/\D/','',$text);
         $reply    = providerReply($qphone, $deals, $COMPANIES);
         $newState = 'idle';
+    }
+
+    // ── מספר טלפון בלבד (בלי הקשר) ───────────────────────
+    elseif (preg_match('/^05\d{8}$/', preg_replace('/\D/','',$text))) {
+        $qphone = preg_replace('/\D/','',$text);
+        if ($state==='wait_customer') {
+            // חיפוש עסקה לפי מספר
+            $reply    = searchDeal($qphone, $deals, $storeId, $COMPANIES, $STATUSES);
+            $newState = 'deal_shown';
+        } else {
+            // שאל מה לעשות עם המספר
+            $reply    = "קיבלתי את המספר {$qphone}. מה תרצה לבדוק?\n• *עסקה* — לחפש עסקה לפי מספר זה\n• *חברה* — לבדוק באיזו חברת תקשורת הוא נמצא";
+            $newState = 'wait_phone_intent';
+            $_SESSION['last_phone'] = $qphone;
+        }
+    }
+
+    // ── ממתין להחלטה על מספר ──────────────────────────────
+    elseif ($state==='wait_phone_intent') {
+        $qphone = $body['last_phone'] ?? '';
+        if (has($text,['עסקה','עסקאות','לקוח'])) {
+            $reply    = searchDeal($qphone, $deals, $storeId, $COMPANIES, $STATUSES);
+            $newState = 'deal_shown';
+        } elseif (has($text,['חברה','מפעיל','ספק'])) {
+            $reply    = providerReply($qphone, $deals, $COMPANIES);
+            $newState = 'idle';
+        } else {
+            $reply    = "לא הבנתי 😊 תרצה לבדוק *עסקה* או *חברת תקשורת* עבור המספר?";
+            $newState = 'wait_phone_intent';
+        }
     }
 
     // ── חבילות ────────────────────────────────────────────
@@ -196,23 +226,32 @@ function searchDeal($q,$deals,$storeId,$COMPANIES,$STATUSES) {
 }
 
 function providerReply($qphone,$deals,$COMPANIES) {
-    $r=crmGet('checkProvider',['phone'=>$qphone]);
-    if ($r&&!empty($r['data'])) {
-        $d=$r['data'];
-        $cid=$d['provider_id']??$d['company_id']??null;
-        $cn=$cid?($COMPANIES[$cid]??"חברה {$cid}"):($d['provider']??$d['company']??'');
+    $r = crmGet('checkProvider', ['phone'=>$qphone]);
+    if ($r && isset($r['data']) && $r['data'] !== null) {
+        $d   = $r['data'];
+        // נסה שדות שונים שה-API עשוי להחזיר
+        $cid = $d['provider_id'] ?? $d['company_id'] ?? $d['operator_id'] ?? null;
+        $cn  = '';
+        if ($cid) $cn = $COMPANIES[$cid] ?? "חברה {$cid}";
+        if (!$cn) $cn = $d['provider'] ?? $d['company'] ?? $d['operator'] ?? $d['name'] ?? '';
         if ($cn) return "📡 המספר {$qphone} נמצא ב-**{$cn}**.";
+        // אם יש data אבל לא הצלחנו לחלץ שם — הצג את מה שיש
+        $raw = json_encode($d, JSON_UNESCAPED_UNICODE);
+        if ($raw && $raw !== '[]' && $raw !== '{}' && $raw !== 'null') {
+            return "📡 תגובת המערכת עבור {$qphone}:\n{$raw}";
+        }
     }
+    // חפש בעסקאות של החנות
     foreach ($deals as $d) {
         foreach (($d['details']??[]) as $det) {
             if (($det['tel_number']??'')===$qphone) {
-                $cid=$d['company']['id']??null;
-                $cn=$cid?($COMPANIES[$cid]??''):($d['company']['name']??'');
+                $cid = $d['company']['id']??null;
+                $cn  = $cid?($COMPANIES[$cid]??''):($d['company']['name']??'');
                 return "📡 המספר {$qphone} נמצא ב-**{$cn}** (לפי עסקאות החנות).";
             }
         }
     }
-    return "לא הצלחתי לאתר את החברה של {$qphone}. 🔍";
+    return "לא הצלחתי לאתר את חברת התקשורת של {$qphone}. ייתכן שהמספר לא במאגר. 🔍";
 }
 ?>
 <!DOCTYPE html>
