@@ -36,7 +36,7 @@ function handleMessage($phone, $text) {
     global $COMPANIES, $STATUSES;
 
     $text = trim($text);
-    $ltext = mb_strtolower($text);
+    $ltext = strtolower($text);
 
     // זיהוי חנות
     $resp = crm('checkUser', ['phone' => $phone]);
