@@ -67,6 +67,8 @@ if ($_SERVER['REQUEST_METHOD']==='POST') {
         exit;
     }
 
+    try {
+
     // זיהוי חנות
     $resp = crmGet('checkUser', ['phone'=>$phone]);
     if (!$resp || empty($resp['success']) || empty($resp['data'])) {
@@ -81,6 +83,7 @@ if ($_SERVER['REQUEST_METHOD']==='POST') {
 
     $reply    = '';
     $newState = 'idle';
+    $extraData = [];
 
     // ── איפוס ──────────────────────────────────────────────
     if (has($text,['התחל מחדש','ביטול','בטל','reset','חזור','תפריט'])) {
@@ -205,10 +208,15 @@ if ($_SERVER['REQUEST_METHOD']==='POST') {
         $newState = 'idle';
     }
 
+    if (!$reply) $reply = "לא הבנתי 😅 תוכל לנסח אחרת?";
     $out = ['reply'=>$reply, 'state'=>$newState];
     if (!empty($extraData)) $out = array_merge($out, $extraData);
     echo json_encode($out, JSON_UNESCAPED_UNICODE);
     exit;
+} catch (Throwable $e) {
+    echo json_encode(['reply'=>'משהו השתבש אצלי 😅 נסה שוב.','state'=>'idle'], JSON_UNESCAPED_UNICODE);
+    exit;
+}
 }
 
 function searchDeal($q,$deals,$storeId,$COMPANIES,$STATUSES) {
@@ -228,7 +236,7 @@ function searchDeal($q,$deals,$storeId,$COMPANIES,$STATUSES) {
     }
 
     if (empty($found)) {
-        return "לא מצאתי עסקה עבור \"{$q}\". 🔍\nתרצה לנסות שם אחר?";
+        return "לא רואה כזאת עסקה במערכת 🔍\nבטוח שהעלת אותה? אולי יש שגיאה בשם?\nתוכל לנסות שוב עם שם אחר או ת\"ז.";
     }
 
     $out = dealText($found[0], $COMPANIES, $STATUSES);
