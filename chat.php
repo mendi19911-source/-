@@ -106,19 +106,22 @@ if ($_SERVER['REQUEST_METHOD']==='POST') {
     // ── ממתין למספר (checkProvider) ───────────────────────
     elseif ($state==='wait_provider') {
         preg_match('/05\d{8}/',$text,$m);
-        $qphone   = $m[0] ?? preg_replace('/\D/','',$text);
-        $reply    = providerReply($qphone, $deals, $COMPANIES);
-        $newState = 'idle';
+        $qphone    = $m[0] ?? preg_replace('/\D/','',$text);
+        $reply     = providerReply($qphone, $deals, $COMPANIES);
+        $reply    .= "\n\nרוצה גם לחפש עסקה על המספר הזה?";
+        $newState  = 'wait_phone_intent';
+        $extraData = ['lastPhone' => $qphone];
     }
 
-    // ── מספר טלפון בלבד (בלי הקשר) ───────────────────────
+    // ── מספר טלפון בלבד ───────────────────────────────────
     elseif (preg_match('/^05\d{8}$/', preg_replace('/\D/','',$text))) {
         $qphone = preg_replace('/\D/','',$text);
         if ($state==='wait_customer') {
             $reply    = searchDeal($qphone, $deals, $storeId, $COMPANIES, $STATUSES);
             $newState = 'deal_shown';
+            $extraData = ['lastPhone' => $qphone];
         } else {
-            $reply     = "קיבלתי את המספר {$qphone}. מה תרצה לבדוק?\n• *עסקה* — לחפש עסקה\n• *חברה* — באיזו חברת תקשורת הוא נמצא";
+            $reply     = "קיבלתי את המספר {$qphone}. מה תרצה?\n• *עסקה* — לחפש עסקה\n• *חברה* — באיזו חברת תקשורת הוא נמצא";
             $newState  = 'wait_phone_intent';
             $extraData = ['lastPhone' => $qphone];
         }
@@ -130,14 +133,20 @@ if ($_SERVER['REQUEST_METHOD']==='POST') {
         if (!$qphone) {
             $reply    = "לא זכרתי את המספר 😅 תשלח אותו שוב?";
             $newState = 'idle';
-        } elseif (has($text,['עסקה','עסקאות','לקוח','לחפש'])) {
-            $reply    = searchDeal($qphone, $deals, $storeId, $COMPANIES, $STATUSES);
-            $newState = 'deal_shown';
+        } elseif (has($text,['עסקה','עסקאות','לקוח','לחפש','כן','אכן','בבקשה'])) {
+            $reply     = searchDeal($qphone, $deals, $storeId, $COMPANIES, $STATUSES);
+            $newState  = 'deal_shown';
+            $extraData = ['lastPhone' => $qphone];
         } elseif (has($text,['חברה','מפעיל','ספק','תקשורת'])) {
-            $reply    = providerReply($qphone, $deals, $COMPANIES);
+            $reply     = providerReply($qphone, $deals, $COMPANIES);
+            $reply    .= "\n\nרוצה גם לחפש עסקה על המספר הזה?";
+            $newState  = 'wait_phone_intent';
+            $extraData = ['lastPhone' => $qphone];
+        } elseif (has($text,['לא','לא תודה','סיום','בסדר'])) {
+            $reply    = "בסדר! 😊 במה עוד אפשר לעזור?";
             $newState = 'idle';
         } else {
-            $reply     = "לא הבנתי 😊 תרצה לבדוק *עסקה* או *חברת תקשורת* עבור {$qphone}?";
+            $reply     = "לא הבנתי 😊 עבור המספר {$qphone} — תרצה *עסקה* או *חברת תקשורת*?";
             $newState  = 'wait_phone_intent';
             $extraData = ['lastPhone' => $qphone];
         }
@@ -195,16 +204,30 @@ if ($_SERVER['REQUEST_METHOD']==='POST') {
         $newState = 'deal_shown';
     }
 
-    // ── אחרי הצגת עסקה ────────────────────────────────────
+    // ── אחרי הצגת עסקה — הבן המשך שיחה ───────────────────
     elseif ($state==='deal_shown') {
-        $reply    = "בסדר {$name}! 😊 רוצה לבדוק עוד משהו?";
-        $newState = 'idle';
+        $qphone = $body['lastPhone'] ?? '';
+        if (has($text,['עסקה','לקוח','לבדוק','סטטוס','אחר','עוד'])) {
+            $reply    = "בשמחה! 😊 על איזה לקוח מדובר? (שם או ת\"ז)";
+            $newState = 'wait_customer';
+        } elseif (has($text,['חברה','מפעיל','ספק'])) {
+            if ($qphone) {
+                $reply    = providerReply($qphone, $deals, $COMPANIES);
+                $newState = 'idle';
+            } else {
+                $reply    = "איזה מספר תרצה לבדוק?";
+                $newState = 'wait_provider';
+            }
+        } else {
+            $reply    = "רוצה לבדוק עוד משהו? 😊";
+            $newState = 'idle';
+        }
+        if ($qphone) $extraData = ['lastPhone' => $qphone];
     }
 
     // ── ברירת מחדל ────────────────────────────────────────
     else {
-        $cnt   = count($deals);
-        $reply = "שלום {$name}! 👋\nאיך אפשר לעזור?\n\n• כתוב *עסקה* — לחפש עסקה לפי שם לקוח\n• כתוב *באיזו חברה 05XXXXXXXX* — לבדוק חברה\n• כתוב *חבילות* — לראות חבילות ומחירים";
+        $reply    = "לא בדיוק הבנתי 😅 איך אפשר לעזור?\n• *עסקה* — לחפש לפי שם לקוח\n• *באיזו חברה 05XXXXXXXX* — לבדוק מפעיל\n• *חבילות* — מחירים וחבילות";
         $newState = 'idle';
     }
 
