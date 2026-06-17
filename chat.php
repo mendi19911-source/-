@@ -1,5 +1,7 @@
 <?php
+ob_start();
 error_reporting(0);
+ini_set('display_errors', 0);
 define('CRM_BASE', 'https://crm.ideali.co.il/api/aibot');
 define('CRM_TOKEN', 'jkFGD78dfgDj8797gsjkh8fdgdf');
 
@@ -120,6 +122,7 @@ function handleMessage($phone, $text) {
 
 // API endpoint
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    ob_clean();
     header('Content-Type: application/json; charset=utf-8');
     $body = json_decode(file_get_contents('php://input'), true);
     $phone = preg_replace('/\D/', '', $body['phone'] ?? '');
@@ -130,9 +133,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
     try {
         $reply = handleMessage($phone, $text);
-        echo json_encode(['reply' => $reply]);
-    } catch (Exception $e) {
-        echo json_encode(['reply' => 'שגיאה: ' . $e->getMessage()]);
+        echo json_encode(['reply' => $reply], JSON_UNESCAPED_UNICODE);
+    } catch (Throwable $e) {
+        echo json_encode(['reply' => 'שגיאה: ' . $e->getMessage()], JSON_UNESCAPED_UNICODE);
     }
     exit;
 }
