@@ -112,29 +112,31 @@ if ($_SERVER['REQUEST_METHOD']==='POST') {
     elseif (preg_match('/^05\d{8}$/', preg_replace('/\D/','',$text))) {
         $qphone = preg_replace('/\D/','',$text);
         if ($state==='wait_customer') {
-            // חיפוש עסקה לפי מספר
             $reply    = searchDeal($qphone, $deals, $storeId, $COMPANIES, $STATUSES);
             $newState = 'deal_shown';
         } else {
-            // שאל מה לעשות עם המספר
-            $reply    = "קיבלתי את המספר {$qphone}. מה תרצה לבדוק?\n• *עסקה* — לחפש עסקה לפי מספר זה\n• *חברה* — לבדוק באיזו חברת תקשורת הוא נמצא";
-            $newState = 'wait_phone_intent';
-            $_SESSION['last_phone'] = $qphone;
+            $reply     = "קיבלתי את המספר {$qphone}. מה תרצה לבדוק?\n• *עסקה* — לחפש עסקה\n• *חברה* — באיזו חברת תקשורת הוא נמצא";
+            $newState  = 'wait_phone_intent';
+            $extraData = ['lastPhone' => $qphone];
         }
     }
 
     // ── ממתין להחלטה על מספר ──────────────────────────────
     elseif ($state==='wait_phone_intent') {
-        $qphone = $body['last_phone'] ?? '';
-        if (has($text,['עסקה','עסקאות','לקוח'])) {
+        $qphone = $body['lastPhone'] ?? '';
+        if (!$qphone) {
+            $reply    = "לא זכרתי את המספר 😅 תשלח אותו שוב?";
+            $newState = 'idle';
+        } elseif (has($text,['עסקה','עסקאות','לקוח','לחפש'])) {
             $reply    = searchDeal($qphone, $deals, $storeId, $COMPANIES, $STATUSES);
             $newState = 'deal_shown';
-        } elseif (has($text,['חברה','מפעיל','ספק'])) {
+        } elseif (has($text,['חברה','מפעיל','ספק','תקשורת'])) {
             $reply    = providerReply($qphone, $deals, $COMPANIES);
             $newState = 'idle';
         } else {
-            $reply    = "לא הבנתי 😊 תרצה לבדוק *עסקה* או *חברת תקשורת* עבור המספר?";
-            $newState = 'wait_phone_intent';
+            $reply     = "לא הבנתי 😊 תרצה לבדוק *עסקה* או *חברת תקשורת* עבור {$qphone}?";
+            $newState  = 'wait_phone_intent';
+            $extraData = ['lastPhone' => $qphone];
         }
     }
 
@@ -203,25 +205,35 @@ if ($_SERVER['REQUEST_METHOD']==='POST') {
         $newState = 'idle';
     }
 
-    echo json_encode(['reply'=>$reply,'state'=>$newState], JSON_UNESCAPED_UNICODE);
+    $out = ['reply'=>$reply, 'state'=>$newState];
+    if (!empty($extraData)) $out = array_merge($out, $extraData);
+    echo json_encode($out, JSON_UNESCAPED_UNICODE);
     exit;
 }
 
 function searchDeal($q,$deals,$storeId,$COMPANIES,$STATUSES) {
-    $found=[];
-    $ql=strtolower(trim($q));
+    $found = [];
+    $ql    = strtolower(trim($q));
+
+    // חפש קודם בעסקאות שכבר הגיעו מ-checkUser
     foreach ($deals as $d) {
-        $hay=strtolower(($d['name']??'').' '.($d['passport']??'').' '.($d['cphone1']??''));
+        $hay = strtolower(($d['name']??'').' '.($d['passport']??'').' '.($d['cphone1']??''));
         if (strpos($hay,$ql)!==false) $found[]=$d;
     }
-    if (empty($found)&&$storeId) {
-        $r=crmGet('deals',['id'=>$storeId,'q'=>$q]);
-        $found=$r['data']??[];
+
+    // אם לא נמצא — קרא ל-API deals עם q
+    if (empty($found) && $storeId) {
+        $r     = crmGet('deals', ['id'=>$storeId, 'q'=>$q]);
+        $found = $r['data'] ?? [];
     }
-    if (empty($found)) return "לא מצאתי עסקה עבור \"{$q}\". 🔍 תרצה לנסות שם אחר?";
-    $out = dealText($found[0],$COMPANIES,$STATUSES);
-    if (count($found)>1) $out.="\n\n(נמצאו ".count($found)." תוצאות — מציג את הראשונה)";
-    $out.="\n\nאיך אפשר לעזור לך בעסקה הזו?";
+
+    if (empty($found)) {
+        return "לא מצאתי עסקה עבור \"{$q}\". 🔍\nתרצה לנסות שם אחר?";
+    }
+
+    $out = dealText($found[0], $COMPANIES, $STATUSES);
+    if (count($found)>1) $out .= "\n\n_(נמצאו ".count($found)." תוצאות — מציג את הראשונה)_";
+    $out .= "\n\nאיך אפשר לעזור לך בעסקה הזו?";
     return $out;
 }
 
@@ -301,7 +313,8 @@ function providerReply($qphone,$deals,$COMPANIES) {
   </div>
 </div>
 <script>
-let convState = 'idle';
+let convState  = 'idle';
+let lastPhone  = '';
 
 function addBubble(text, who) {
   const d = document.getElementById('messages');
@@ -326,10 +339,11 @@ async function send() {
     const res  = await fetch('', {
       method: 'POST',
       headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({phone, message: msg, state: convState})
+      body: JSON.stringify({phone, message: msg, state: convState, lastPhone})
     });
     const data = await res.json();
-    convState  = data.state || 'idle';
+    convState = data.state  || 'idle';
+    if (data.lastPhone) lastPhone = data.lastPhone;
     addBubble(data.reply || 'אין תגובה', 'bot');
   } catch(e) {
     addBubble('שגיאת תקשורת 😕', 'bot');
