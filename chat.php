@@ -184,16 +184,16 @@ if ($_SERVER['REQUEST_METHOD']==='POST') {
 
     // ── כוונה כללית לעסקה ─────────────────────────────────
     elseif (has($text,['עסקה','לקוח','לבדוק','סטטוס','עדכון','מה קורה עם','מצב'])) {
-        // אולי יש כבר שם בטקסט?
-        $noiseWords = ['עסקה של','מה קורה עם','סטטוס של','עדכון על','מצב של','לבדוק','הלקוח','לקוח','עסקה','סטטוס'];
-        $q = $text;
-        foreach ($noiseWords as $n) $q = str_ireplace($n,'',$q);
-        $q = trim($q,' ?,.');
-        if (strlen($q)>2 && !has($q,['עסקה','לקוח','בדוק'])) {
-            $reply    = searchDeal($q,$deals,$storeId,$COMPANIES,$STATUSES);
+        // חלץ שם רק אם הפורמט הוא "עסקה של X" / "מה קורה עם X" / "סטטוס של X"
+        $q = null;
+        if (preg_match('/(?:עסקה של|סטטוס של|מה קורה עם|עדכון על|מצב של)\s+(.+)/u', $text, $m)) {
+            $q = trim($m[1], ' ?.,');
+        }
+        if ($q && strlen($q) > 1) {
+            $reply    = searchDeal($q, $deals, $storeId, $COMPANIES, $STATUSES);
             $newState = 'deal_shown';
         } else {
-            $reply    = "בשמחה! 😊 על איזה לקוח מדובר? (שם או ת\"ז)";
+            $reply    = "בשמחה! 😊 על איזה לקוח מדובר? (שם, ת\"ז או מספר טלפון)";
             $newState = 'wait_customer';
         }
     }
