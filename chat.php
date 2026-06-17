@@ -1,142 +1,127 @@
 <?php
-ob_start();
-error_reporting(0);
-ini_set('display_errors', 0);
 define('CRM_BASE', 'https://crm.ideali.co.il/api/aibot');
 define('CRM_TOKEN', 'jkFGD78dfgDj8797gsjkh8fdgdf');
 
 $COMPANIES = [1=>'סלקום',2=>'פרטנר',4=>'פלאפון',5=>'גולן טלקום',6=>'הוט מובייל',12=>'wecom'];
-$STATUSES = [
-    'OPEN'=>'פתוח',
-    'PROCESS_SHOP'=>'בטיפול חנות',
-    'WAITING_CONNECT'=>'ממתין לחיבור',
-    'CONN_NOT_NIY'=>'חובר - לא נויד',
-    'NIYUD_ACTIVATED'=>'נויד ומופעל',
-    'DONE'=>'הושלם',
-    'CANCELLED'=>'בוטל',
-    'ROBOT_ERROR_SYS'=>'שגיאת מערכת',
+$STATUSES_HE = [
+    'OPEN'=>'פתוח','PROCESS_SHOP'=>'בטיפול חנות','WAITING_CONNECT'=>'ממתין לחיבור',
+    'CONN_NOT_NIY'=>'חובר - לא נויד','NIYUD_ACTIVATED'=>'נויד ומופעל',
+    'DONE'=>'הושלם','CANCELLED'=>'בוטל','ROBOT_ERROR_SYS'=>'שגיאת מערכת',
 ];
 
-function crm($endpoint, $params=[]) {
+function crmGet($endpoint, $params=[]) {
     $params['token'] = CRM_TOKEN;
     $url = CRM_BASE . '/' . $endpoint . '?' . http_build_query($params);
     $ch = curl_init($url);
-    curl_setopt_array($ch, [
-        CURLOPT_RETURNTRANSFER => true,
-        CURLOPT_TIMEOUT => 15,
-        CURLOPT_SSL_VERIFYPEER => false,
-        CURLOPT_FOLLOWLOCATION => true,
-    ]);
+    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+    curl_setopt($ch, CURLOPT_TIMEOUT, 15);
+    curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+    curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, false);
     $res = curl_exec($ch);
+    $err = curl_error($ch);
     curl_close($ch);
-    return json_decode($res, true);
+    if ($err) return ['error' => $err];
+    $decoded = json_decode($res, true);
+    if ($decoded === null) return ['error' => 'bad json: ' . substr($res, 0, 100)];
+    return $decoded;
 }
 
-function handleMessage($phone, $text) {
-    global $COMPANIES, $STATUSES;
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    header('Content-Type: application/json; charset=utf-8');
+    $raw = file_get_contents('php://input');
+    $body = json_decode($raw, true);
+    $phone = preg_replace('/\D/', '', $body['phone'] ?? '');
+    $text = trim($body['message'] ?? '');
 
-    $text = trim($text);
-    $ltext = strtolower($text);
-
-    // זיהוי חנות
-    $resp = crm('checkUser', ['phone' => $phone]);
-    if (!$resp || !($resp['success'] ?? false) || empty($resp['data'])) {
-        return "❌ המספר $phone לא מזוהה במערכת כחנות.";
+    if (!$phone || !$text) {
+        echo json_encode(['reply' => 'שגיאה: חסר מספר או הודעה'], JSON_UNESCAPED_UNICODE);
+        exit;
     }
 
-    $data = $resp['data'];
-    $user = $data['user'] ?? [];
-    $deals = $data['deals'] ?? [];
-    $storeName = $user['name'] ?? 'חנות';
-    $storeId = $user['id'] ?? null;
-    $city = $user['city'] ?? '';
+    // זיהוי חנות
+    $resp = crmGet('checkUser', ['phone' => $phone]);
+    if (isset($resp['error'])) {
+        echo json_encode(['reply' => 'שגיאת חיבור ל-CRM: ' . $resp['error']], JSON_UNESCAPED_UNICODE);
+        exit;
+    }
+    if (empty($resp['success']) || empty($resp['data'])) {
+        echo json_encode(['reply' => "המספר $phone לא מזוהה במערכת."], JSON_UNESCAPED_UNICODE);
+        exit;
+    }
 
-    // עסקאות / סטטוס
-    if (str_contains($ltext, 'עסקה') || str_contains($ltext, 'עסקאות') || str_contains($ltext, 'סטטוס') || str_contains($ltext, 'מה קורה') || str_contains($ltext, 'שלום')) {
+    $data    = $resp['data'];
+    $user    = $data['user'] ?? [];
+    $deals   = $data['deals'] ?? [];
+    $name    = $user['name'] ?? 'חנות';
+    $city    = $user['city'] ?? '';
+    $email   = $user['email'] ?? '';
+    $uphone  = $user['phone'] ?? '';
+
+    $ltext = strtolower($text);
+
+    // עסקאות
+    if (strpos($ltext, 'עסק') !== false || strpos($ltext, 'סטטוס') !== false || strpos($ltext, 'מה קורה') !== false || strpos($text, 'שלום') !== false || strpos($text, 'היי') !== false || strpos($text, 'hi') !== false || strpos($text, 'hello') !== false) {
         if (empty($deals)) {
-            return "📋 **$storeName** — אין עסקאות פתוחות כרגע.";
+            echo json_encode(['reply' => "📋 $name — אין עסקאות כרגע."], JSON_UNESCAPED_UNICODE);
+            exit;
         }
-        $out = "📋 **עסקאות של $storeName** ($city):\n\n";
+        $out = "📋 עסקאות של $name";
+        if ($city) $out .= " ($city)";
+        $out .= ":\n\n";
         foreach ($deals as $d) {
-            $status = $d['status']['name'] ?? '';
-            $company = $d['company']['name'] ?? '';
-            $customer = $d['name'] ?? '';
-            $out .= "👤 $customer";
-            if ($company) $out .= " | $company";
+            $cname   = $d['company']['name'] ?? '';
+            $status  = $d['status']['name'] ?? '';
+            $cust    = $d['name'] ?? '';
+            $out .= "👤 $cust";
+            if ($cname) $out .= " | $cname";
             if ($status) $out .= " | $status";
             $out .= "\n";
-
             foreach (($d['details'] ?? []) as $det) {
-                $tel = $det['tel_number'] ?? '';
-                $pkg = $det['package_raw']['name'] ?? '';
-                $detStatus = $det['status']['name'] ?? '';
-                if ($tel) $out .= "   📱 $tel";
-                if ($pkg) $out .= " — $pkg";
-                if ($detStatus) $out .= " ($detStatus)";
-                $out .= "\n";
+                $tel   = $det['tel_number'] ?? '';
+                $pkg   = $det['package_raw']['name'] ?? '';
+                $ds    = $det['status']['name'] ?? '';
+                if ($tel || $pkg) {
+                    $out .= "   📱 $tel";
+                    if ($pkg) $out .= " — $pkg";
+                    if ($ds) $out .= " ($ds)";
+                    $out .= "\n";
+                }
             }
             $out .= "\n";
         }
-        return $out;
+        echo json_encode(['reply' => $out], JSON_UNESCAPED_UNICODE);
+        exit;
     }
 
     // חבילות
-    if (str_contains($ltext, 'חבילה') || str_contains($ltext, 'חבילות')) {
-        $res = crm('get-packages', []);
-        $pkgs = $res['data'] ?? [];
-        if (empty($pkgs)) return "לא נמצאו חבילות.";
-        $out = "📦 **חבילות זמינות:**\n\n";
+    if (strpos($ltext, 'חבילה') !== false || strpos($ltext, 'חבילות') !== false) {
+        $r2 = crmGet('get-packages');
+        $pkgs = $r2['data'] ?? [];
+        if (empty($pkgs)) {
+            echo json_encode(['reply' => 'לא נמצאו חבילות.'], JSON_UNESCAPED_UNICODE);
+            exit;
+        }
+        $out = "📦 חבילות זמינות:\n\n";
         foreach (array_slice($pkgs, 0, 10) as $p) {
-            $name = $p['name'] ?? $p['title'] ?? '';
-            $cost = $p['cost'] ?? '';
-            $out .= "• $name";
+            $pname = $p['name'] ?? $p['title'] ?? '';
+            $cost  = $p['cost'] ?? '';
+            $out .= "• $pname";
             if ($cost) $out .= " — ₪$cost";
             $out .= "\n";
         }
-        return $out;
-    }
-
-    // ברירת מחדל — פרטי חנות + עסקאות
-    $out = "🏪 **$storeName**";
-    if ($city) $out .= " | $city";
-    $out .= "\n";
-    if (!empty($user['phone'])) $out .= "📱 " . $user['phone'] . "\n";
-    if (!empty($user['email'])) $out .= "✉️ " . $user['email'] . "\n";
-    $out .= "\n";
-
-    if (!empty($deals)) {
-        $out .= "עסקאות אחרונות: " . count($deals) . "\n\n";
-        foreach (array_slice($deals, 0, 3) as $d) {
-            $status = $d['status']['name'] ?? '';
-            $company = $d['company']['name'] ?? '';
-            $customer = $d['name'] ?? '';
-            $out .= "• $customer — $company — $status\n";
-        }
-    } else {
-        $out .= "אין עסקאות פתוחות.\n";
-    }
-
-    $out .= "\nמה תרצה לדעת?\n• **עסקאות** — רשימת עסקאות מפורטת\n• **חבילות** — חבילות זמינות למכירה";
-    return $out;
-}
-
-// API endpoint
-if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    ob_clean();
-    header('Content-Type: application/json; charset=utf-8');
-    $body = json_decode(file_get_contents('php://input'), true);
-    $phone = preg_replace('/\D/', '', $body['phone'] ?? '');
-    $text  = $body['message'] ?? '';
-    if (!$phone || !$text) {
-        echo json_encode(['reply' => 'שגיאה: חסר מספר או הודעה']);
+        echo json_encode(['reply' => $out], JSON_UNESCAPED_UNICODE);
         exit;
     }
-    try {
-        $reply = handleMessage($phone, $text);
-        echo json_encode(['reply' => $reply], JSON_UNESCAPED_UNICODE);
-    } catch (Throwable $e) {
-        echo json_encode(['reply' => 'שגיאה: ' . $e->getMessage()], JSON_UNESCAPED_UNICODE);
-    }
+
+    // ברירת מחדל
+    $out = "🏪 $name";
+    if ($city) $out .= " | $city";
+    $out .= "\n";
+    if ($uphone) $out .= "📱 $uphone\n";
+    if ($email) $out .= "✉️ $email\n";
+    $out .= "\nיש " . count($deals) . " עסקאות.\n\n";
+    $out .= "מה תרצה?\n• עסקאות — לראות עסקאות וסטטוסים\n• חבילות — חבילות למכירה";
+    echo json_encode(['reply' => $out], JSON_UNESCAPED_UNICODE);
     exit;
 }
 ?>
@@ -148,7 +133,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 <title>אול אין — בוט CRM</title>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { font-family: Arial, sans-serif; background: #e5ddd5; height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+  body { font-family: Arial, sans-serif; background: #e5ddd5; height: 100vh; display: flex; align-items: center; justify-content: center; }
   .container { width: 100%; max-width: 520px; height: 100vh; display: flex; flex-direction: column; background: #fff; }
   .header { background: #075e54; color: #fff; padding: 16px 20px; display: flex; align-items: center; gap: 12px; }
   .header .avatar { width: 42px; height: 42px; border-radius: 50%; background: #25d366; display: flex; align-items: center; justify-content: center; font-size: 20px; }
@@ -179,7 +164,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     <input type="tel" id="phone" placeholder="0509089908" value="0509089908">
   </div>
   <div class="messages" id="messages">
-    <div class="bubble bot">שלום! אני הבוט של אול אין 👋<br><br>אני יכול לעזור לך עם:<br>• <b>עסקאות</b> — רשימת עסקאות וסטטוסים<br>• <b>חבילות</b> — חבילות זמינות למכירה<br><br>שנה את המספר למעלה אם צריך, ואז כתוב מה תרצה לדעת.</div>
+    <div class="bubble bot">שלום! אני הבוט של אול אין 👋<br><br>אני יכול לעזור לך עם:<br>• <b>עסקאות</b> — רשימת עסקאות וסטטוסים<br>• <b>חבילות</b> — חבילות זמינות למכירה<br><br>פשוט כתוב מה תרצה לדעת.</div>
   </div>
   <div class="typing" id="typing"></div>
   <div class="input-bar">
@@ -192,7 +177,7 @@ function addBubble(text, who) {
   const d = document.getElementById('messages');
   const b = document.createElement('div');
   b.className = 'bubble ' + who;
-  b.innerHTML = text.replace(/\*\*(.*?)\*\*/g,'<strong>$1</strong>');
+  b.innerHTML = text.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/\*\*(.*?)\*\*/g,'<strong>$1</strong>');
   d.appendChild(b);
   d.scrollTop = d.scrollHeight;
 }
@@ -204,15 +189,16 @@ async function send() {
   document.getElementById('msg').value = '';
   document.getElementById('typing').textContent = 'הבוט מקליד...';
   try {
-    const res = await fetch(location.href, {
+    const res = await fetch('', {
       method: 'POST',
-      headers: {'Content-Type': 'application/json'},
+      headers: {'Content-Type': 'application/json; charset=utf-8'},
       body: JSON.stringify({phone, message: msg})
     });
-    const data = await res.json();
+    const text = await res.text();
+    const data = JSON.parse(text);
     addBubble(data.reply, 'bot');
   } catch(e) {
-    addBubble('שגיאת תקשורת — נסה שוב 😕\n' + e, 'bot');
+    addBubble('שגיאת תקשורת 😕\n' + e, 'bot');
   }
   document.getElementById('typing').textContent = '';
 }
