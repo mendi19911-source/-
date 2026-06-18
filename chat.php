@@ -116,6 +116,22 @@ if ($_SERVER['REQUEST_METHOD']==='POST') {
         $name    = $user['name']  ?? 'חנות';
         $city    = $user['city']  ?? '';
 
+        // בדיקת מפעיל לפי מספר טלפון
+        $providerCtx = '';
+        if (preg_match('/מפעיל|חברה|איזה חברה|באיזה חברה|לבדוק מספר|בדוק מספר/u', $text)) {
+            preg_match('/05\d{8}/', $text, $phoneMatch);
+            $checkPhone = $phoneMatch[0] ?? '';
+            if ($checkPhone) {
+                $pr = crmGet('checkProvider', ['phone'=>$checkPhone]);
+                if (!empty($pr['data'])) {
+                    $providerCtx = "=== בדיקת מפעיל למספר {$checkPhone} ===\n".json_encode($pr['data'], JSON_UNESCAPED_UNICODE)."\n";
+                } else {
+                    $providerCtx = "=== בדיקת מפעיל למספר {$checkPhone} ===\nלא נמצא מידע\n";
+                }
+            }
+        }
+        if ($providerCtx) $system2 = $providerCtx;
+
         $needPackages = preg_match('/חבילה|חבילות|מחיר|כמה עולה|להציע/u', $text);
         $packagesCtx  = '';
         if ($needPackages) {
@@ -139,6 +155,7 @@ if ($_SERVER['REQUEST_METHOD']==='POST') {
         $system .= "אתה מדבר עם נציג החנות בשם: {$name}, עיר: {$city}, טלפון: {$phone}\n\n";
         $system .= "=== עסקאות החנות ===\n{$dealsCtx}\n";
         if ($packagesCtx) $system .= "=== חבילות זמינות ===\n{$packagesCtx}\n";
+        if (!empty($system2)) $system .= "\n".$system2;
         $system .= "\n=== הנחיות ===\n";
         $system .= "1. ענה תמיד בעברית, בטון חברותי ואנושי.\n";
         $system .= "2. משפטים קצרים. מקסימום 3-4 משפטים בכל תגובה.\n";
