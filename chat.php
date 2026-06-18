@@ -1,4 +1,7 @@
 <?php
+ob_start();
+error_reporting(0);
+ini_set('display_errors', 0);
 define('CRM_BASE', 'https://crm.ideali.co.il/api/aibot');
 define('CRM_TOKEN', 'jkFGD78dfgDj8797gsjkh8fdgdf');
 
@@ -55,19 +58,19 @@ function dealText($d, $COMPANIES, $STATUSES) {
 }
 
 if ($_SERVER['REQUEST_METHOD']==='POST') {
+    ob_clean();
     header('Content-Type: application/json; charset=utf-8');
 
+    try {
     $body  = json_decode(file_get_contents('php://input'), true);
     $phone = preg_replace('/\D/','', $body['phone']  ?? '');
     $text  = trim($body['message'] ?? '');
-    $state = trim($body['state']   ?? 'idle'); // מצב שמגיע מהדפדפן
+    $state = trim($body['state']   ?? 'idle');
 
     if (!$phone || !$text) {
         echo json_encode(['reply'=>'שגיאה: חסר מספר או הודעה.','state'=>'idle'], JSON_UNESCAPED_UNICODE);
         exit;
     }
-
-    try {
 
     // זיהוי חנות
     $resp = crmGet('checkUser', ['phone'=>$phone]);
@@ -237,7 +240,8 @@ if ($_SERVER['REQUEST_METHOD']==='POST') {
     echo json_encode($out, JSON_UNESCAPED_UNICODE);
     exit;
 } catch (Throwable $e) {
-    echo json_encode(['reply'=>'משהו השתבש אצלי 😅 נסה שוב.','state'=>'idle'], JSON_UNESCAPED_UNICODE);
+    ob_clean();
+    echo json_encode(['reply'=>'שגיאה: '.$e->getMessage().' (שורה '.$e->getLine().')','state'=>'idle'], JSON_UNESCAPED_UNICODE);
     exit;
 }
 }
