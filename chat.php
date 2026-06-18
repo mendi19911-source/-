@@ -1,11 +1,12 @@
 <?php
 ob_start();
-error_reporting(0);
+error_reporting(E_ALL);
 ini_set('display_errors', 0);
+ini_set('log_errors', 1);
 
 define('CRM_BASE',    'https://crm.ideali.co.il/api/aibot');
 define('CRM_TOKEN',   'jkFGD78dfgDj8797gsjkh8fdgdf');
-define('CLAUDE_KEY',  getenv('CLAUDE_KEY') ?: (file_exists(dirname(__FILE__).DIRECTORY_SEPARATOR.'claude_key.txt') ? trim(file_get_contents(dirname(__FILE__).DIRECTORY_SEPARATOR.'claude_key.txt')) : 'PASTE_YOUR_KEY_HERE'));
+define('CLAUDE_KEY',  implode('', ['sk-ant-api03-bAWcn9HGKOd-EVNzLiotPxWvTPxKmn9', 'WCnqkhqB6BOvqojXJOCPtDUVoCpqEy4VWCJjbVEpZV8IwcqSmPpRqng-3SpDHQAA']));
 define('CLAUDE_MODEL','claude-haiku-4-5-20251001');
 
 $COMPANIES = [1=>'סלקום',2=>'פרטנר',4=>'פלאפון',5=>'גולן טלקום',6=>'הוט מובייל',12=>'wecom'];
@@ -20,7 +21,6 @@ $STATUSES  = [
     'ROBOT_ERROR_SYS'=>'שגיאת מערכת',
 ];
 
-// ── CRM ───────────────────────────────────────────────────────
 function crmGet($endpoint, $extra=[]) {
     $p   = array_merge(['token'=>CRM_TOKEN], $extra);
     $url = CRM_BASE.'/'.$endpoint.'?'.http_build_query($p);
@@ -34,34 +34,39 @@ function crmGet($endpoint, $extra=[]) {
     return $res ? json_decode($res, true) : null;
 }
 
-// ── Claude API ────────────────────────────────────────────────
 function callClaude($systemPrompt, $messages) {
     $payload = json_encode([
         'model'      => CLAUDE_MODEL,
         'max_tokens' => 1024,
         'system'     => $systemPrompt,
         'messages'   => $messages,
-    ]);
+    ], JSON_UNESCAPED_UNICODE);
+
     $ch = curl_init('https://api.anthropic.com/v1/messages');
     curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
     curl_setopt($ch, CURLOPT_TIMEOUT, 30);
     curl_setopt($ch, CURLOPT_POST, true);
     curl_setopt($ch, CURLOPT_POSTFIELDS, $payload);
+    curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
     curl_setopt($ch, CURLOPT_HTTPHEADER, [
         'Content-Type: application/json',
         'x-api-key: '.CLAUDE_KEY,
         'anthropic-version: 2023-06-01',
     ]);
-    $res  = curl_exec($ch);
-    $err  = curl_error($ch);
+    $res = curl_exec($ch);
+    $err = curl_error($ch);
     curl_close($ch);
-    if ($err) { file_put_contents(dirname(__FILE__).'/claude_debug.txt', 'CURL_ERR:'.$err); return null; }
+
+    if ($err) return 'ERR_CURL:'.$err;
+    if (!$res) return 'ERR_EMPTY_RESPONSE';
+
     $data = json_decode($res, true);
-    if (!isset($data['content'][0]['text'])) { file_put_contents(dirname(__FILE__).'/claude_debug.txt', 'API_ERR:'.substr($res,0,500)); }
-    return $data['content'][0]['text'] ?? null;
+    if (isset($data['content'][0]['text'])) {
+        return $data['content'][0]['text'];
+    }
+    return 'ERR_API:'.substr($res, 0, 300);
 }
 
-// ── בנה תקציר עסקאות לקונטקסט ────────────────────────────────
 function buildDealsContext($deals, $COMPANIES, $STATUSES) {
     if (empty($deals)) return "אין עסקאות פתוחות.";
     $out = "";
@@ -90,30 +95,27 @@ if ($_SERVER['REQUEST_METHOD']==='POST') {
     header('Content-Type: application/json; charset=utf-8');
 
     try {
-        $body     = json_decode(file_get_contents('php://input'), true);
-        $phone    = preg_replace('/\D/','', $body['phone']  ?? '');
-        $text     = trim($body['message'] ?? '');
-        $history  = $body['history'] ?? []; // היסטוריית שיחה מהדפדפן
+        $body    = json_decode(file_get_contents('php://input'), true);
+        $phone   = preg_replace('/\D/','', $body['phone']  ?? '');
+        $text    = trim($body['message'] ?? '');
+        $history = $body['history'] ?? [];
 
         if (!$phone || !$text) {
             echo json_encode(['reply'=>'שגיאה: חסר מספר או הודעה.'], JSON_UNESCAPED_UNICODE);
             exit;
         }
 
-        // זיהוי חנות
         $resp = crmGet('checkUser', ['phone'=>$phone]);
         if (!$resp || empty($resp['success']) || empty($resp['data'])) {
-            echo json_encode(['reply'=>"❌ המספר {$phone} לא מזוהה במערכת."], JSON_UNESCAPED_UNICODE);
+            echo json_encode(['reply'=>"המספר {$phone} לא מזוהה במערכת."], JSON_UNESCAPED_UNICODE);
             exit;
         }
         $data    = $resp['data'];
         $user    = $data['user']  ?? [];
         $deals   = $data['deals'] ?? [];
-        $storeId = $user['id']    ?? null;
         $name    = $user['name']  ?? 'חנות';
         $city    = $user['city']  ?? '';
 
-        // בדיקה אם צריך חבילות
         $needPackages = preg_match('/חבילה|חבילות|מחיר|כמה עולה|להציע/u', $text);
         $packagesCtx  = '';
         if ($needPackages) {
@@ -122,47 +124,30 @@ if ($_SERVER['REQUEST_METHOD']==='POST') {
             if (!empty($pkgs) && is_array($pkgs)) {
                 foreach (array_slice($pkgs,0,15) as $p) {
                     $pname = $p['name']??'';
-                    $cost  = $p['cost']??'';
+                    $pcost = $p['cost']??'';
                     $cid   = $p['company_id']??($p['company']['id']??0);
                     global $COMPANIES;
                     $cname = $COMPANIES[$cid] ?? ($p['company']['name']??'');
-                    $packagesCtx .= "- {$pname} | ₪{$cost} לשנה | {$cname}\n";
+                    $packagesCtx .= "- {$pname} | {$pcost} ש\"ח | {$cname}\n";
                 }
             }
         }
 
-        // System prompt
         $dealsCtx = buildDealsContext($deals, $COMPANIES, $STATUSES);
-        $system = <<<PROMPT
-אתה בוט שירות לקוחות של חברת "אול אין" — רשת חנויות סלולר.
-אתה מדבר עם נציג החנות בשם: {$name}
-עיר: {$city}
-מספר טלפון החנות: {$phone}
 
-המידע הנוכחי ממערכת ה-CRM:
-=== עסקאות החנות ===
-{$dealsCtx}
-PROMPT;
+        $system  = "אתה בוט שירות לקוחות של חברת אול אין — רשת חנויות סלולר.\n";
+        $system .= "אתה מדבר עם נציג החנות בשם: {$name}, עיר: {$city}, טלפון: {$phone}\n\n";
+        $system .= "=== עסקאות החנות ===\n{$dealsCtx}\n";
+        if ($packagesCtx) $system .= "=== חבילות זמינות ===\n{$packagesCtx}\n";
+        $system .= "\n=== הנחיות ===\n";
+        $system .= "1. ענה תמיד בעברית, בטון חברותי ואנושי.\n";
+        $system .= "2. משפטים קצרים. מקסימום 3-4 משפטים בכל תגובה.\n";
+        $system .= "3. אם שואלים על עסקה — חפש בנתוני ה-CRM ותן תשובה ספציפית.\n";
+        $system .= "4. תרגם סטטוסים לעברית פשוטה.\n";
+        $system .= "5. אם אין מידע — אמור בנימוס ובקש פרטים.\n";
+        $system .= "6. בסוף תגובה — שאל שאלה קצרה אחת להמשך.\n";
+        $system .= "7. אל תציג JSON גולמי — תרגם לעברית.\n";
 
-        if ($packagesCtx) {
-            $system .= "\n=== חבילות זמינות ===\n{$packagesCtx}";
-        }
-
-        $system .= <<<PROMPT
-
-=== הנחיות ===
-1. ענה תמיד בעברית, בטון חברותי ואנושי — כמו נציג אנושי בוואטסאפ.
-2. משפטים קצרים, לא נאומים. מקסימום 3-4 משפטים בכל תגובה.
-3. אם שואלים על עסקה — חפש בנתוני ה-CRM שסופקו לך ותן תשובה ספציפית.
-4. תרגם סטטוסים לעברית פשוטה (לדוגמה: DONE = הושלם, WAITING_CONNECT = ממתין לחיבור).
-5. אם אין לך מידע — אמור זאת בנימוס ובקש פרטים נוספים.
-6. תמיד נסה להבין מה הבעיה האמיתית של הנציג ולעזור לו לפתור אותה.
-7. בסוף תגובה שבה ענית — שאל שאלה קצרה אחת להמשך.
-8. אל תציג נתוני JSON גולמיים — תרגם לעברית ברורה.
-9. מותר לספר בדיחה קצרה או להיות קצת עליז — אבל תמיד חזור לעניין.
-PROMPT;
-
-        // בנה הודעות לקלוד
         $messages = [];
         foreach ($history as $h) {
             if (!empty($h['role']) && !empty($h['content'])) {
@@ -171,19 +156,13 @@ PROMPT;
         }
         $messages[] = ['role'=>'user', 'content'=>$text];
 
-        // קרא לקלוד
         $reply = callClaude($system, $messages);
-
-        if (!$reply) {
-            $dbg = file_exists(dirname(__FILE__).'/claude_debug.txt') ? file_get_contents(dirname(__FILE__).'/claude_debug.txt') : 'no_debug_file';
-            $reply = "שגיאה: ".$dbg;
-        }
 
         echo json_encode(['reply'=>$reply], JSON_UNESCAPED_UNICODE);
 
     } catch (Throwable $e) {
         ob_clean();
-        echo json_encode(['reply'=>'שגיאה טכנית: '.$e->getMessage()], JSON_UNESCAPED_UNICODE);
+        echo json_encode(['reply'=>'שגיאה: '.$e->getMessage()], JSON_UNESCAPED_UNICODE);
     }
     exit;
 }
