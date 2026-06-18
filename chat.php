@@ -37,24 +37,34 @@ function has($text, $words) {
 
 function dealText($d, $COMPANIES, $STATUSES) {
     $cname = $d['company']['name'] ?? ($COMPANIES[$d['company']['id']??0]??'');
-    $suid  = $d['status']['uid']  ?? '';
-    $sname = $STATUSES[$suid]     ?? ($d['status']['name'] ?? '');
-    $cust  = $d['name']           ?? '';
-    $out   = "מצאתי את העסקה של *{$cust}*";
+    $suid  = $d['status']['uid']   ?? '';
+    $sname = $STATUSES[$suid]      ?? ($d['status']['name'] ?? '');
+    $cust  = $d['name']            ?? '';
+    $date  = substr($d['created_at']??'', 0, 10);
+
+    $out = "✅ מצאתי עסקה";
+    if ($cust)  $out .= " של *{$cust}*";
     if ($cname) $out .= " בחברת {$cname}";
-    $out  .= ".\nסטטוס: {$sname}";
-    foreach (($d['details']??[]) as $det) {
-        $tel  = $det['tel_number']??'';
-        $pkg  = $det['package_raw']['name']??'';
-        $cost = $det['package_raw']['cost']??'';
-        $ds   = $det['status']['name']??'';
-        $line = "\n📞 {$tel}";
-        if ($pkg)  $line .= " — {$pkg}";
-        if ($cost) $line .= " (₪{$cost})";
-        if ($ds)   $line .= " | {$ds}";
-        $out .= $line;
+    if ($date)  $out .= " (נפתחה {$date})";
+    $out .= "\n";
+    if ($sname) $out .= "📌 סטטוס: {$sname}\n";
+
+    $details = $d['details'] ?? [];
+    if (!empty($details)) {
+        foreach ($details as $det) {
+            $tel  = $det['tel_number']          ?? '';
+            $pkg  = $det['package_raw']['name'] ?? '';
+            $cost = $det['package_raw']['cost'] ?? '';
+            $ds   = $det['status']['name']      ?? '';
+            if (!$tel && !$pkg) continue;
+            $line = "📞 {$tel}";
+            if ($pkg)  $line .= " — {$pkg}";
+            if ($cost) $line .= " (₪{$cost} לשנה)";
+            if ($ds)   $line .= " | {$ds}";
+            $out .= $line . "\n";
+        }
     }
-    return $out;
+    return trim($out);
 }
 
 if ($_SERVER['REQUEST_METHOD']==='POST') {
@@ -210,8 +220,11 @@ if ($_SERVER['REQUEST_METHOD']==='POST') {
     // ── אחרי הצגת עסקה — הבן המשך שיחה ───────────────────
     elseif ($state==='deal_shown') {
         $qphone = $body['lastPhone'] ?? '';
-        if (has($text,['עסקה','לקוח','לבדוק','סטטוס','אחר','עוד'])) {
-            $reply    = "בשמחה! 😊 על איזה לקוח מדובר? (שם או ת\"ז)";
+        if (has($text,['סטטוס','מה הסטטוס','מה קורה','עדכון','מה המצב'])) {
+            $reply    = "הסטטוס מופיע בעסקה שהצגתי למעלה 👆\nרוצה שאחפש עסקה אחרת?";
+            $newState = 'deal_shown';
+        } elseif (has($text,['עסקה אחרת','עוד עסקה','לקוח אחר','אחר'])) {
+            $reply    = "בשמחה! על איזה לקוח? (שם, ת\"ז או מספר)";
             $newState = 'wait_customer';
         } elseif (has($text,['חברה','מפעיל','ספק'])) {
             if ($qphone) {
@@ -221,8 +234,14 @@ if ($_SERVER['REQUEST_METHOD']==='POST') {
                 $reply    = "איזה מספר תרצה לבדוק?";
                 $newState = 'wait_provider';
             }
+        } elseif (has($text,['כן','בטח','אוקי','המשך'])) {
+            $reply    = "על איזה לקוח? (שם, ת\"ז או מספר)";
+            $newState = 'wait_customer';
+        } elseif (has($text,['לא','סיימתי','תודה','bye'])) {
+            $reply    = "בשמחה! אם צריך עוד משהו — אני כאן 😊";
+            $newState = 'idle';
         } else {
-            $reply    = "רוצה לבדוק עוד משהו? 😊";
+            $reply    = "אפשר לעזור עוד? 😊\nאני יכול לחפש עסקה אחרת, לבדוק חברה, או להציג חבילות.";
             $newState = 'idle';
         }
         if ($qphone) $extraData = ['lastPhone' => $qphone];
@@ -266,7 +285,12 @@ function searchDeal($q,$deals,$storeId,$COMPANIES,$STATUSES) {
         return "לא רואה כזאת עסקה במערכת 🔍\nבטוח שהעלת אותה? אולי יש שגיאה בשם?\nתוכל לנסות שוב עם שם אחר או ת\"ז.";
     }
 
-    $out = dealText($found[0], $COMPANIES, $STATUSES);
+    $d = $found[0];
+    // וודא שהעסקה מכילה נתונים אמיתיים
+    if (empty($d['name']) && empty($d['id']) && empty($d['status'])) {
+        return "לא מצאתי עסקה עבור \"{$q}\" 🔍\nאולי יש טעות בשם? נסה שם אחר, ת\"ז או מספר טלפון.";
+    }
+    $out = dealText($d, $COMPANIES, $STATUSES);
     if (count($found)>1) $out .= "\n\n_(נמצאו ".count($found)." תוצאות — מציג את הראשונה)_";
     $out .= "\n\nאיך אפשר לעזור לך בעסקה הזו?";
     return $out;
