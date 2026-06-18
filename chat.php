@@ -175,7 +175,8 @@ PROMPT;
         $reply = callClaude($system, $messages);
 
         if (!$reply) {
-            $reply = "סליחה, יש לי בעיה טכנית רגעית 😅 נסה שוב.";
+            $dbg = file_exists(dirname(__FILE__).'/claude_debug.txt') ? file_get_contents(dirname(__FILE__).'/claude_debug.txt') : 'no_debug_file';
+            $reply = "שגיאה: ".$dbg;
         }
 
         echo json_encode(['reply'=>$reply], JSON_UNESCAPED_UNICODE);
