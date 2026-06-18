@@ -5,7 +5,7 @@ ini_set('display_errors', 0);
 
 define('CRM_BASE',    'https://crm.ideali.co.il/api/aibot');
 define('CRM_TOKEN',   'jkFGD78dfgDj8797gsjkh8fdgdf');
-define('CLAUDE_KEY',  getenv('CLAUDE_KEY') ?: (file_exists(__DIR__.'/claude_key.txt') ? trim(file_get_contents(__DIR__.'/claude_key.txt')) : 'PASTE_YOUR_KEY_HERE'));
+define('CLAUDE_KEY',  getenv('CLAUDE_KEY') ?: (file_exists(dirname(__FILE__).DIRECTORY_SEPARATOR.'claude_key.txt') ? trim(file_get_contents(dirname(__FILE__).DIRECTORY_SEPARATOR.'claude_key.txt')) : 'PASTE_YOUR_KEY_HERE'));
 define('CLAUDE_MODEL','claude-haiku-4-5-20251001');
 
 $COMPANIES = [1=>'סלקום',2=>'פרטנר',4=>'פלאפון',5=>'גולן טלקום',6=>'הוט מובייל',12=>'wecom'];
