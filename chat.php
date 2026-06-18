@@ -2,8 +2,11 @@
 ob_start();
 error_reporting(0);
 ini_set('display_errors', 0);
-define('CRM_BASE', 'https://crm.ideali.co.il/api/aibot');
-define('CRM_TOKEN', 'jkFGD78dfgDj8797gsjkh8fdgdf');
+
+define('CRM_BASE',    'https://crm.ideali.co.il/api/aibot');
+define('CRM_TOKEN',   'jkFGD78dfgDj8797gsjkh8fdgdf');
+define('CLAUDE_KEY',  getenv('CLAUDE_KEY') ?: (file_exists(__DIR__.'/claude_key.txt') ? trim(file_get_contents(__DIR__.'/claude_key.txt')) : 'PASTE_YOUR_KEY_HERE'));
+define('CLAUDE_MODEL','claude-haiku-4-5-20251001');
 
 $COMPANIES = [1=>'סלקום',2=>'פרטנר',4=>'פלאפון',5=>'גולן טלקום',6=>'הוט מובייל',12=>'wecom'];
 $STATUSES  = [
@@ -12,11 +15,12 @@ $STATUSES  = [
     'WAITING_CONNECT'=>'ממתין לחיבור',
     'CONN_NOT_NIY'=>'חובר — הניוד לא הושלם',
     'NIYUD_ACTIVATED'=>'הניוד יצא לדרך',
-    'DONE'=>'הושלמה בהצלחה ✅',
-    'CANCELLED'=>'מבוטלת ❌',
-    'ROBOT_ERROR_SYS'=>'שגיאת מערכת ⚠️',
+    'DONE'=>'הושלמה בהצלחה',
+    'CANCELLED'=>'מבוטלת',
+    'ROBOT_ERROR_SYS'=>'שגיאת מערכת',
 ];
 
+// ── CRM ───────────────────────────────────────────────────────
 function crmGet($endpoint, $extra=[]) {
     $p   = array_merge(['token'=>CRM_TOKEN], $extra);
     $url = CRM_BASE.'/'.$endpoint.'?'.http_build_query($p);
@@ -30,41 +34,54 @@ function crmGet($endpoint, $extra=[]) {
     return $res ? json_decode($res, true) : null;
 }
 
-function has($text, $words) {
-    foreach ($words as $w) if (strpos($text,$w)!==false) return true;
-    return false;
+// ── Claude API ────────────────────────────────────────────────
+function callClaude($systemPrompt, $messages) {
+    $payload = json_encode([
+        'model'      => CLAUDE_MODEL,
+        'max_tokens' => 1024,
+        'system'     => $systemPrompt,
+        'messages'   => $messages,
+    ]);
+    $ch = curl_init('https://api.anthropic.com/v1/messages');
+    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+    curl_setopt($ch, CURLOPT_TIMEOUT, 30);
+    curl_setopt($ch, CURLOPT_POST, true);
+    curl_setopt($ch, CURLOPT_POSTFIELDS, $payload);
+    curl_setopt($ch, CURLOPT_HTTPHEADER, [
+        'Content-Type: application/json',
+        'x-api-key: '.CLAUDE_KEY,
+        'anthropic-version: 2023-06-01',
+    ]);
+    $res  = curl_exec($ch);
+    $err  = curl_error($ch);
+    curl_close($ch);
+    if ($err) return null;
+    $data = json_decode($res, true);
+    return $data['content'][0]['text'] ?? null;
 }
 
-function dealText($d, $COMPANIES, $STATUSES) {
-    $cname = $d['company']['name'] ?? ($COMPANIES[$d['company']['id']??0]??'');
-    $suid  = $d['status']['uid']   ?? '';
-    $sname = $STATUSES[$suid]      ?? ($d['status']['name'] ?? '');
-    $cust  = $d['name']            ?? '';
-    $date  = substr($d['created_at']??'', 0, 10);
-
-    $out = "✅ מצאתי עסקה";
-    if ($cust)  $out .= " של *{$cust}*";
-    if ($cname) $out .= " בחברת {$cname}";
-    if ($date)  $out .= " (נפתחה {$date})";
-    $out .= "\n";
-    if ($sname) $out .= "📌 סטטוס: {$sname}\n";
-
-    $details = $d['details'] ?? [];
-    if (!empty($details)) {
-        foreach ($details as $det) {
-            $tel  = $det['tel_number']          ?? '';
-            $pkg  = $det['package_raw']['name'] ?? '';
-            $cost = $det['package_raw']['cost'] ?? '';
-            $ds   = $det['status']['name']      ?? '';
-            if (!$tel && !$pkg) continue;
-            $line = "📞 {$tel}";
-            if ($pkg)  $line .= " — {$pkg}";
-            if ($cost) $line .= " (₪{$cost} לשנה)";
-            if ($ds)   $line .= " | {$ds}";
-            $out .= $line . "\n";
+// ── בנה תקציר עסקאות לקונטקסט ────────────────────────────────
+function buildDealsContext($deals, $COMPANIES, $STATUSES) {
+    if (empty($deals)) return "אין עסקאות פתוחות.";
+    $out = "";
+    foreach ($deals as $d) {
+        $cname = $d['company']['name'] ?? ($COMPANIES[$d['company']['id']??0]??'');
+        $suid  = $d['status']['uid']  ?? '';
+        $sname = $STATUSES[$suid]     ?? ($d['status']['name'] ?? '');
+        $cust  = $d['name']           ?? '';
+        $pid   = $d['passport']       ?? '';
+        $phone = $d['cphone1']        ?? '';
+        $date  = substr($d['created_at']??'',0,10);
+        $out  .= "- עסקה #{$d['id']}: לקוח={$cust}, ת\"ז={$pid}, טלפון={$phone}, חברה={$cname}, סטטוס={$sname}, תאריך={$date}\n";
+        foreach (($d['details']??[]) as $det) {
+            $tel  = $det['tel_number']??'';
+            $pkg  = $det['package_raw']['name']??'';
+            $cost = $det['package_raw']['cost']??'';
+            $ds   = $det['status']['name']??'';
+            $out .= "  קו: {$tel}, חבילה: {$pkg} ₪{$cost}, סטטוס קו: {$ds}\n";
         }
     }
-    return trim($out);
+    return $out;
 }
 
 if ($_SERVER['REQUEST_METHOD']==='POST') {
@@ -72,332 +89,101 @@ if ($_SERVER['REQUEST_METHOD']==='POST') {
     header('Content-Type: application/json; charset=utf-8');
 
     try {
-    $body  = json_decode(file_get_contents('php://input'), true);
-    $phone = preg_replace('/\D/','', $body['phone']  ?? '');
-    $text  = trim($body['message'] ?? '');
-    $state = trim($body['state']   ?? 'idle');
+        $body     = json_decode(file_get_contents('php://input'), true);
+        $phone    = preg_replace('/\D/','', $body['phone']  ?? '');
+        $text     = trim($body['message'] ?? '');
+        $history  = $body['history'] ?? []; // היסטוריית שיחה מהדפדפן
 
-    if (!$phone || !$text) {
-        echo json_encode(['reply'=>'שגיאה: חסר מספר או הודעה.','state'=>'idle'], JSON_UNESCAPED_UNICODE);
-        exit;
-    }
-
-    // זיהוי חנות
-    $resp = crmGet('checkUser', ['phone'=>$phone]);
-    if (!$resp || empty($resp['success']) || empty($resp['data'])) {
-        echo json_encode(['reply'=>"❌ המספר {$phone} לא מזוהה במערכת.",'state'=>'idle'], JSON_UNESCAPED_UNICODE);
-        exit;
-    }
-    $data    = $resp['data'];
-    $user    = $data['user']  ?? [];
-    $deals   = $data['deals'] ?? [];
-    $storeId = $user['id']    ?? null;
-    $name    = $user['name']  ?? 'שלום';
-
-    $reply    = '';
-    $newState = 'idle';
-    $extraData = [];
-
-    $lastQuery = $body['lastQuery'] ?? ''; // השאילתה האחרונה
-
-    // ── חזרה על חיפוש אחרון ───────────────────────────────
-    if (has($text,['שוב','אותה','חזור על','תחזור','שוב פעם','עוד פעם']) && $lastQuery) {
-        $reply     = searchDeal($lastQuery, $deals, $storeId, $COMPANIES, $STATUSES);
-        $newState  = 'deal_shown';
-        $extraData = ['lastQuery' => $lastQuery];
-    }
-
-    // ── איפוס ──────────────────────────────────────────────
-    elseif (has($text,['התחל מחדש','בטל','reset','תפריט'])) {
-        $reply = "בסדר! 😊 במה אפשר לעזור, {$name}?";
-        $newState = 'idle';
-    }
-
-    // ── בדיקת חברה (מפעיל) ───────────────────────────────
-    elseif (has($text,['באיזו חברה','איזה חברה','איזו חברה','ספק של','באיזה ספק','מפעיל','באיזה מפעיל','חברת תקשורת'])) {
-        preg_match('/05\d{8}/',$text,$m);
-        if (!$m) {
-            $reply    = "בשמחה! 👍 איזה מספר תרצה לבדוק?";
-            $newState = 'wait_provider';
-        } else {
-            $reply    = providerReply($m[0], $deals, $COMPANIES);
-            $newState = 'idle';
+        if (!$phone || !$text) {
+            echo json_encode(['reply'=>'שגיאה: חסר מספר או הודעה.'], JSON_UNESCAPED_UNICODE);
+            exit;
         }
-    }
 
-    // ── ממתין למספר (checkProvider) ───────────────────────
-    elseif ($state==='wait_provider') {
-        preg_match('/05\d{8}/',$text,$m);
-        $qphone    = $m[0] ?? preg_replace('/\D/','',$text);
-        $reply     = providerReply($qphone, $deals, $COMPANIES);
-        $reply    .= "\n\nרוצה גם לחפש עסקה על המספר הזה?";
-        $newState  = 'wait_phone_intent';
-        $extraData = ['lastPhone' => $qphone];
-    }
-
-    // ── מספר טלפון (05XXXXXXXX) ───────────────────────────
-    elseif (preg_match('/^05\d{8}$/', preg_replace('/\D/','',$text))) {
-        $qphone = preg_replace('/\D/','',$text);
-        if ($state==='wait_customer') {
-            $reply     = searchDeal($qphone, $deals, $storeId, $COMPANIES, $STATUSES);
-            $newState  = 'deal_shown';
-            $extraData = ['lastPhone' => $qphone, 'lastQuery' => $qphone];
-        } else {
-            $reply     = "קיבלתי את המספר {$qphone}. מה תרצה?\n• *עסקה* — לחפש עסקה\n• *חברה* — באיזו חברת תקשורת הוא נמצא";
-            $newState  = 'wait_phone_intent';
-            $extraData = ['lastPhone' => $qphone];
+        // זיהוי חנות
+        $resp = crmGet('checkUser', ['phone'=>$phone]);
+        if (!$resp || empty($resp['success']) || empty($resp['data'])) {
+            echo json_encode(['reply'=>"❌ המספר {$phone} לא מזוהה במערכת."], JSON_UNESCAPED_UNICODE);
+            exit;
         }
-    }
+        $data    = $resp['data'];
+        $user    = $data['user']  ?? [];
+        $deals   = $data['deals'] ?? [];
+        $storeId = $user['id']    ?? null;
+        $name    = $user['name']  ?? 'חנות';
+        $city    = $user['city']  ?? '';
 
-    // ── מספר שאינו טלפון (ת"ז, מספר עסקה) → חפש בעסקאות ──
-    elseif (preg_match('/^\d{6,9}$/', trim($text))) {
-        $reply     = searchDeal(trim($text), $deals, $storeId, $COMPANIES, $STATUSES);
-        $newState  = 'deal_shown';
-        $extraData = ['lastQuery' => trim($text)];
-    }
-
-    // ── ממתין להחלטה על מספר ──────────────────────────────
-    elseif ($state==='wait_phone_intent') {
-        $qphone = $body['lastPhone'] ?? '';
-        if (!$qphone) {
-            $reply    = "לא זכרתי את המספר 😅 תשלח אותו שוב?";
-            $newState = 'idle';
-        } elseif (has($text,['עסקה','עסקאות','לקוח','לחפש','כן','אכן','בבקשה'])) {
-            $reply     = searchDeal($qphone, $deals, $storeId, $COMPANIES, $STATUSES);
-            $newState  = 'deal_shown';
-            $extraData = ['lastPhone' => $qphone];
-        } elseif (has($text,['חברה','מפעיל','ספק','תקשורת'])) {
-            $reply     = providerReply($qphone, $deals, $COMPANIES);
-            $reply    .= "\n\nרוצה גם לחפש עסקה על המספר הזה?";
-            $newState  = 'wait_phone_intent';
-            $extraData = ['lastPhone' => $qphone];
-        } elseif (has($text,['לא','לא תודה','סיום','בסדר'])) {
-            $reply    = "בסדר! 😊 במה עוד אפשר לעזור?";
-            $newState = 'idle';
-        } else {
-            $reply     = "לא הבנתי 😊 עבור המספר {$qphone} — תרצה *עסקה* או *חברת תקשורת*?";
-            $newState  = 'wait_phone_intent';
-            $extraData = ['lastPhone' => $qphone];
-        }
-    }
-
-    // ── חבילות ────────────────────────────────────────────
-    elseif (has($text,['חבילה','חבילות','מחיר','כמה עולה','מה יש להציע','מה אפשר להציע'])) {
-        $r    = crmGet('get-packages');
-        // נסה כמה מבנים אפשריים שה-API מחזיר
-        $pkgs = [];
-        if (!empty($r['data'])) {
-            if (isset($r['data']['packages']) && is_array($r['data']['packages'])) {
-                $pkgs = $r['data']['packages'];
-            } elseif (is_array($r['data']) && isset($r['data'][0])) {
-                $pkgs = $r['data'];
-            } elseif (is_array($r['data'])) {
-                // data היא אובייקט עם חבילות כערכים
-                foreach ($r['data'] as $k => $v) {
-                    if (is_array($v) && isset($v['name'])) $pkgs[] = $v;
+        // בדיקה אם צריך חבילות
+        $needPackages = preg_match('/חבילה|חבילות|מחיר|כמה עולה|להציע/u', $text);
+        $packagesCtx  = '';
+        if ($needPackages) {
+            $r    = crmGet('get-packages');
+            $pkgs = $r['data']['packages'] ?? $r['data'] ?? [];
+            if (!empty($pkgs) && is_array($pkgs)) {
+                foreach (array_slice($pkgs,0,15) as $p) {
+                    $pname = $p['name']??'';
+                    $cost  = $p['cost']??'';
+                    $cid   = $p['company_id']??($p['company']['id']??0);
+                    global $COMPANIES;
+                    $cname = $COMPANIES[$cid] ?? ($p['company']['name']??'');
+                    $packagesCtx .= "- {$pname} | ₪{$cost} לשנה | {$cname}\n";
                 }
             }
         }
-        if (empty($pkgs)) {
-            $reply = "לא נמצאו חבילות כרגע. נסה שוב מאוחר יותר.";
-        } else {
-            $byCompany = [];
-            foreach ($pkgs as $p) {
-                $cid   = $p['company_id'] ?? ($p['company']['id'] ?? 0);
-                $cname = $COMPANIES[$cid] ?? ($p['company']['name'] ?? 'כללי');
-                $byCompany[$cname][] = $p;
+
+        // System prompt
+        $dealsCtx = buildDealsContext($deals, $COMPANIES, $STATUSES);
+        $system = <<<PROMPT
+אתה בוט שירות לקוחות של חברת "אול אין" — רשת חנויות סלולר.
+אתה מדבר עם נציג החנות בשם: {$name}
+עיר: {$city}
+מספר טלפון החנות: {$phone}
+
+המידע הנוכחי ממערכת ה-CRM:
+=== עסקאות החנות ===
+{$dealsCtx}
+PROMPT;
+
+        if ($packagesCtx) {
+            $system .= "\n=== חבילות זמינות ===\n{$packagesCtx}";
+        }
+
+        $system .= <<<PROMPT
+
+=== הנחיות ===
+1. ענה תמיד בעברית, בטון חברותי ואנושי — כמו נציג אנושי בוואטסאפ.
+2. משפטים קצרים, לא נאומים. מקסימום 3-4 משפטים בכל תגובה.
+3. אם שואלים על עסקה — חפש בנתוני ה-CRM שסופקו לך ותן תשובה ספציפית.
+4. תרגם סטטוסים לעברית פשוטה (לדוגמה: DONE = הושלם, WAITING_CONNECT = ממתין לחיבור).
+5. אם אין לך מידע — אמור זאת בנימוס ובקש פרטים נוספים.
+6. תמיד נסה להבין מה הבעיה האמיתית של הנציג ולעזור לו לפתור אותה.
+7. בסוף תגובה שבה ענית — שאל שאלה קצרה אחת להמשך.
+8. אל תציג נתוני JSON גולמיים — תרגם לעברית ברורה.
+9. מותר לספר בדיחה קצרה או להיות קצת עליז — אבל תמיד חזור לעניין.
+PROMPT;
+
+        // בנה הודעות לקלוד
+        $messages = [];
+        foreach ($history as $h) {
+            if (!empty($h['role']) && !empty($h['content'])) {
+                $messages[] = ['role'=>$h['role'], 'content'=>$h['content']];
             }
-            $reply = "📦 **חבילות זמינות:**\n\n";
-            foreach ($byCompany as $cname => $list) {
-                $reply .= "🔹 *{$cname}*\n";
-                foreach (array_slice($list, 0, 4) as $p) {
-                    $pname = $p['name'] ?? $p['title'] ?? '';
-                    $cost  = $p['cost'] ?? '';
-                    $reply .= "   • {$pname}";
-                    if ($cost) $reply .= " — ₪{$cost} לשנה";
-                    $reply .= "\n";
-                }
-                $reply .= "\n";
-            }
-            $reply .= "רוצה פרטים על חבילה מסוימת?";
         }
-        $newState = 'idle';
-    }
+        $messages[] = ['role'=>'user', 'content'=>$text];
 
-    // ── פתיחת שיחה ────────────────────────────────────────
-    elseif (has($text,['שלום','היי','הי','בוקר טוב','ערב טוב','hi','hello','hey','yo'])) {
-        $greetings = [
-            "שלום {$name}! 👋 איך אני יכול לעזור היום?",
-            "היי {$name}! 😊 מה אפשר לעשות בשבילך?",
-            "שלום שלום {$name}! 👋 מה שלומך? אפשר לעזור?",
-        ];
-        $reply    = $greetings[array_rand($greetings)];
-        $newState = 'idle';
-    }
+        // קרא לקלוד
+        $reply = callClaude($system, $messages);
 
-    // ── שאלות על הרגשות / מצב הבוט ───────────────────────
-    elseif (has($text,['איך אתה','מה שלומך','מה המצב שלך','איך הולך','מה קורה איתך','איך מרגיש'])) {
-        $replies = [
-            "מעולה, תודה שאתה שואל! 😄 עובד כבר 24/7 בלי הפסקה — אני בוט, לא מתעייף 😂\nאז מה אפשר לעשות בשבילך {$name}?",
-            "מצוין! עסוק בלעזור לחנויות כמוך 💪 אתה הלקוח הכי טוב שיש לי 😄\nאגב — יש משהו שאפשר לעזור בו?",
-            "אני בסדר גמור תודה! קצת חסר לי שינה אבל מה לעשות 😅\nאז {$name}, מה מביא אותך אליי?",
-        ];
-        $reply    = $replies[array_rand($replies)];
-        $newState = 'idle';
-    }
-
-    // ── בדיחות ────────────────────────────────────────────
-    elseif (has($text,['בדיחה','ספר לי משהו','תצחיק אותי','joke'])) {
-        $jokes = [
-            "טוב טוב 😄 הנה:\nלמה הבוט לא אוהב יום שישי?\nכי אחרי שבת הוא צריך לעשות restart! 😂\n\nאז {$name}, מה אפשר לעשות בשבילך?",
-            "הא! 😄\nלקוח מתקשר לחנות סלולר: 'הטלפון שלי לא עובד!'\nנציג: 'ניסית לכבות ולהדליק?'\nלקוח: 'כן, כיביתי את הטלפון, ועכשיו אין לי איך להתקשר' 😂\n\nאנחנו יכולים להמשיך? 😊",
-            "בסדר, אחת קצרה 😄\nלמה המספר 6 פחד מ-7?\nכי 7 אכל 9! 😂\n\nעכשיו ברצינות — {$name}, אפשר לעזור עם משהו?",
-        ];
-        $reply    = $jokes[array_rand($jokes)];
-        $newState = 'idle';
-    }
-
-    // ── תודה / מחמאות ─────────────────────────────────────
-    elseif (has($text,['תודה','תודה רבה','כל הכבוד','מצוין','אחלה','נהדר','מדהים','קולי'])) {
-        $replies = [
-            "בשמחה! 😊 זה מה שאני כאן בשבילו. יש עוד משהו שאפשר לעזור?",
-            "תודה {$name}! 🙏 זה נותן לי כוח להמשיך 😄 יש עוד משהו?",
-            "אחלה! 😊 תמיד כאן בשבילך. צריך עוד משהו?",
-        ];
-        $reply    = $replies[array_rand($replies)];
-        $newState = 'idle';
-    }
-
-    // ── "מה קורה" — יכול להיות שאלה אישית או על עסקה ──────
-    elseif (has($text,['מה קורה','מה נשמע','מה יש'])) {
-        $reply    = "הכל טוב מצידי! 😄 אצלך מה קורה {$name}?\nיש לקוח שצריך עזרה? או שמשהו תקוע?";
-        $newState = 'idle';
-    }
-
-    // ── כוונה כללית לעסקה ─────────────────────────────────
-    elseif (has($text,['עסקה','לקוח','לבדוק עסקה','סטטוס עסקה','עדכון על','מה קורה עם'])) {
-        $q = null;
-        if (preg_match('/(?:עסקה של|סטטוס של|מה קורה עם|עדכון על|מצב של)\s+(.+)/u', $text, $m)) {
-            $q = trim($m[1], ' ?.,');
+        if (!$reply) {
+            $reply = "סליחה, יש לי בעיה טכנית רגעית 😅 נסה שוב.";
         }
-        if ($q && strlen($q) > 1) {
-            $reply     = searchDeal($q, $deals, $storeId, $COMPANIES, $STATUSES);
-            $newState  = 'deal_shown';
-            $extraData = ['lastQuery' => $q];
-        } else {
-            $reply    = "בשמחה! 😊 תן לי שם, ת\"ז או מספר טלפון של הלקוח.";
-            $newState = 'wait_customer';
-        }
+
+        echo json_encode(['reply'=>$reply], JSON_UNESCAPED_UNICODE);
+
+    } catch (Throwable $e) {
+        ob_clean();
+        echo json_encode(['reply'=>'שגיאה טכנית: '.$e->getMessage()], JSON_UNESCAPED_UNICODE);
     }
-
-    // ── ממתין לשם לקוח ────────────────────────────────────
-    elseif ($state==='wait_customer') {
-        $reply     = searchDeal($text, $deals, $storeId, $COMPANIES, $STATUSES);
-        $newState  = 'deal_shown';
-        $extraData = ['lastQuery' => $text];
-    }
-
-    // ── אחרי הצגת עסקה — הבן המשך שיחה ───────────────────
-    elseif ($state==='deal_shown') {
-        $qphone    = $body['lastPhone'] ?? '';
-        $lq        = $body['lastQuery'] ?? '';
-        if ($qphone) $extraData['lastPhone'] = $qphone;
-        if ($lq)    $extraData['lastQuery']  = $lq;
-
-        if (has($text,['חברה','מפעיל','ספק'])) {
-            $reply    = $qphone ? providerReply($qphone, $deals, $COMPANIES) : "איזה מספר תרצה לבדוק?";
-            $newState = $qphone ? 'idle' : 'wait_provider';
-        } elseif (has($text,['לא','סיימתי','תודה','bye','ביי'])) {
-            $reply    = "בשמחה {$name}! 😊 אם צריך — אני כאן.";
-            $newState = 'idle';
-        } else {
-            // כל שאלה אחרת — הבן שהם רוצים לחפש עסקה
-            $reply    = "בשמחה! 😊 תן לי שם, ת\"ז או מספר של הלקוח.";
-            $newState = 'wait_customer';
-        }
-    }
-
-    // ── ברירת מחדל ────────────────────────────────────────
-    else {
-        $defaults = [
-            "לא לגמרי הבנתי 😅 תנסח אחרת?\nאני טוב בלחפש עסקאות, לבדוק חברות, ולהציג חבילות.",
-            "היי {$name}, לא הצלחתי לתפוס 😄 תנסה:\n• שם לקוח לחיפוש עסקה\n• מספר טלפון לבדיקת חברה\n• המילה *חבילות* לרשימת חבילות",
-            "סליחה, לא הבנתי 😅 תוכל לנסח אחרת? אני מצוין בלמצוא עסקאות ולבדוק מפעילים!",
-        ];
-        $reply    = str_replace('{$name}', $name, $defaults[array_rand($defaults)]);
-        $newState = 'idle';
-    }
-
-    if (!$reply) $reply = "לא הבנתי 😅 תוכל לנסח אחרת?";
-    $out = ['reply'=>$reply, 'state'=>$newState];
-    if (!empty($extraData)) $out = array_merge($out, $extraData);
-    echo json_encode($out, JSON_UNESCAPED_UNICODE);
     exit;
-} catch (Throwable $e) {
-    ob_clean();
-    echo json_encode(['reply'=>'שגיאה: '.$e->getMessage().' (שורה '.$e->getLine().')','state'=>'idle'], JSON_UNESCAPED_UNICODE);
-    exit;
-}
-}
-
-function searchDeal($q,$deals,$storeId,$COMPANIES,$STATUSES) {
-    $found = [];
-    $ql    = strtolower(trim($q));
-
-    // חפש קודם בעסקאות שכבר הגיעו מ-checkUser
-    foreach ($deals as $d) {
-        $hay = strtolower(($d['name']??'').' '.($d['passport']??'').' '.($d['cphone1']??''));
-        if (strpos($hay,$ql)!==false) $found[]=$d;
-    }
-
-    // אם לא נמצא — קרא ל-API deals עם q
-    if (empty($found) && $storeId) {
-        $r     = crmGet('deals', ['id'=>$storeId, 'q'=>$q]);
-        $found = $r['data'] ?? [];
-    }
-
-    if (empty($found)) {
-        return "לא רואה כזאת עסקה במערכת 🔍\nבטוח שהעלת אותה? אולי יש שגיאה בשם?\nתוכל לנסות שוב עם שם אחר או ת\"ז.";
-    }
-
-    $d = $found[0];
-    // וודא שהעסקה מכילה נתונים אמיתיים
-    if (empty($d['name']) && empty($d['id']) && empty($d['status'])) {
-        return "לא מצאתי עסקה עבור \"{$q}\" 🔍\nאולי יש טעות בשם? נסה שם אחר, ת\"ז או מספר טלפון.";
-    }
-    $out = dealText($d, $COMPANIES, $STATUSES);
-    if (count($found)>1) $out .= "\n\n_(נמצאו ".count($found)." תוצאות — מציג את הראשונה)_";
-    $out .= "\n\nאיך אפשר לעזור לך בעסקה הזו?";
-    return $out;
-}
-
-function providerReply($qphone,$deals,$COMPANIES) {
-    $r = crmGet('checkProvider', ['phone'=>$qphone]);
-    if ($r && isset($r['data']) && $r['data'] !== null) {
-        $d   = $r['data'];
-        // נסה שדות שונים שה-API עשוי להחזיר
-        $cid = $d['provider_id'] ?? $d['company_id'] ?? $d['operator_id'] ?? null;
-        $cn  = '';
-        if ($cid) $cn = $COMPANIES[$cid] ?? "חברה {$cid}";
-        if (!$cn) $cn = $d['provider'] ?? $d['company'] ?? $d['operator'] ?? $d['name'] ?? '';
-        if ($cn) return "📡 המספר {$qphone} נמצא ב-**{$cn}**.";
-        // אם יש data אבל לא הצלחנו לחלץ שם — הצג את מה שיש
-        $raw = json_encode($d, JSON_UNESCAPED_UNICODE);
-        if ($raw && $raw !== '[]' && $raw !== '{}' && $raw !== 'null') {
-            return "📡 תגובת המערכת עבור {$qphone}:\n{$raw}";
-        }
-    }
-    // חפש בעסקאות של החנות
-    foreach ($deals as $d) {
-        foreach (($d['details']??[]) as $det) {
-            if (($det['tel_number']??'')===$qphone) {
-                $cid = $d['company']['id']??null;
-                $cn  = $cid?($COMPANIES[$cid]??''):($d['company']['name']??'');
-                return "📡 המספר {$qphone} נמצא ב-**{$cn}** (לפי עסקאות החנות).";
-            }
-        }
-    }
-    return "לא הצלחתי לאתר את חברת התקשורת של {$qphone}. ייתכן שהמספר לא במאגר. 🔍";
 }
 ?>
 <!DOCTYPE html>
@@ -405,7 +191,7 @@ function providerReply($qphone,$deals,$COMPANIES) {
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>אול אין — בוט CRM</title>
+<title>אול אין — בוט AI</title>
 <style>
   *{box-sizing:border-box;margin:0;padding:0}
   body{font-family:Arial,sans-serif;background:#e5ddd5;height:100vh;display:flex;align-items:center;justify-content:center}
@@ -431,14 +217,14 @@ function providerReply($qphone,$deals,$COMPANIES) {
 <div class="container">
   <div class="header">
     <div class="avatar">🤖</div>
-    <div class="info"><h2>בוט אול אין</h2><p>מחובר ל-CRM ideali</p></div>
+    <div class="info"><h2>בוט אול אין AI</h2><p>מופעל על ידי Claude AI</p></div>
   </div>
   <div class="phone-bar">
     <label>📱 מספר חנות:</label>
     <input type="tel" id="phone" value="0544951010">
   </div>
   <div class="messages" id="messages">
-    <div class="bubble bot">שלום! 👋 אני הבוט של אול אין. כתוב לי מה אתה צריך.</div>
+    <div class="bubble bot">שלום! 👋 אני הבוט החכם של אול אין, מופעל על ידי AI.<br>אני יכול לעזור עם עסקאות, סטטוסים, חבילות ועוד.<br>מה אפשר לעשות בשבילך?</div>
   </div>
   <div class="typing" id="typing"></div>
   <div class="input-bar">
@@ -447,9 +233,7 @@ function providerReply($qphone,$deals,$COMPANIES) {
   </div>
 </div>
 <script>
-let convState  = 'idle';
-let lastPhone  = '';
-let lastQuery  = '';
+let history = [];
 
 function addBubble(text, who) {
   const d = document.getElementById('messages');
@@ -467,20 +251,22 @@ async function send() {
   const msg   = document.getElementById('msg').value.trim();
   const phone = document.getElementById('phone').value.trim();
   if (!msg || !phone) return;
+
   addBubble(msg, 'user');
+  history.push({role:'user', content: msg});
   document.getElementById('msg').value = '';
   document.getElementById('typing').textContent = 'הבוט מקליד...';
+
   try {
     const res  = await fetch('', {
       method: 'POST',
       headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({phone, message: msg, state: convState, lastPhone, lastQuery})
+      body: JSON.stringify({phone, message: msg, history: history.slice(-10)})
     });
     const data = await res.json();
-    convState = data.state  || 'idle';
-    if (data.lastPhone) lastPhone = data.lastPhone;
-    if (data.lastQuery) lastQuery = data.lastQuery;
-    addBubble(data.reply || 'אין תגובה', 'bot');
+    const reply = data.reply || 'אין תגובה';
+    addBubble(reply, 'bot');
+    history.push({role:'assistant', content: reply});
   } catch(e) {
     addBubble('שגיאת תקשורת 😕', 'bot');
   }
