@@ -55,8 +55,9 @@ function callClaude($systemPrompt, $messages) {
     $res  = curl_exec($ch);
     $err  = curl_error($ch);
     curl_close($ch);
-    if ($err) return null;
+    if ($err) { file_put_contents(dirname(__FILE__).'/claude_debug.txt', 'CURL_ERR:'.$err); return null; }
     $data = json_decode($res, true);
+    if (!isset($data['content'][0]['text'])) { file_put_contents(dirname(__FILE__).'/claude_debug.txt', 'API_ERR:'.substr($res,0,500)); }
     return $data['content'][0]['text'] ?? null;
 }
 
