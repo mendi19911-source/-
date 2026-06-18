@@ -135,18 +135,25 @@ if ($_SERVER['REQUEST_METHOD']==='POST') {
         $extraData = ['lastPhone' => $qphone];
     }
 
-    // ── מספר טלפון בלבד ───────────────────────────────────
+    // ── מספר טלפון (05XXXXXXXX) ───────────────────────────
     elseif (preg_match('/^05\d{8}$/', preg_replace('/\D/','',$text))) {
         $qphone = preg_replace('/\D/','',$text);
         if ($state==='wait_customer') {
-            $reply    = searchDeal($qphone, $deals, $storeId, $COMPANIES, $STATUSES);
-            $newState = 'deal_shown';
-            $extraData = ['lastPhone' => $qphone];
+            $reply     = searchDeal($qphone, $deals, $storeId, $COMPANIES, $STATUSES);
+            $newState  = 'deal_shown';
+            $extraData = ['lastPhone' => $qphone, 'lastQuery' => $qphone];
         } else {
             $reply     = "קיבלתי את המספר {$qphone}. מה תרצה?\n• *עסקה* — לחפש עסקה\n• *חברה* — באיזו חברת תקשורת הוא נמצא";
             $newState  = 'wait_phone_intent';
             $extraData = ['lastPhone' => $qphone];
         }
+    }
+
+    // ── מספר שאינו טלפון (ת"ז, מספר עסקה) → חפש בעסקאות ──
+    elseif (preg_match('/^\d{6,9}$/', trim($text))) {
+        $reply     = searchDeal(trim($text), $deals, $storeId, $COMPANIES, $STATUSES);
+        $newState  = 'deal_shown';
+        $extraData = ['lastQuery' => trim($text)];
     }
 
     // ── ממתין להחלטה על מספר ──────────────────────────────
