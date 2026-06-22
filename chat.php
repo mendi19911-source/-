@@ -132,39 +132,31 @@ if ($_SERVER['REQUEST_METHOD']==='POST') {
         }
         if ($providerCtx) $system2 = $providerCtx;
 
-        $needPackages = preg_match('/חבילה|חבילות|מחיר|כמה עולה|להציע|גיגה|דקות|סים|SIM|sim|ג\'יגה/u', $text);
+        // תמיד טוען חבילות — Claude יחליט מה רלוונטי
         $packagesCtx  = '';
-        if ($needPackages) {
-            $r = crmGet('get-packages');
-            // נסה כל מבנה אפשרי של API
-            $pkgs = [];
-            if (!empty($r['data']['packages']) && is_array($r['data']['packages'])) {
-                $pkgs = $r['data']['packages'];
-            } elseif (!empty($r['data']) && is_array($r['data'])) {
-                $pkgs = $r['data'];
-            } elseif (!empty($r['packages']) && is_array($r['packages'])) {
-                $pkgs = $r['packages'];
-            } elseif (!empty($r) && is_array($r)) {
-                // אולי זה מערך ישיר
-                foreach ($r as $item) {
-                    if (is_array($item) && isset($item['name'])) { $pkgs = $r; break; }
-                }
+        $r = crmGet('get-packages');
+        $pkgs = [];
+        if (!empty($r['data']['packages']) && is_array($r['data']['packages'])) {
+            $pkgs = $r['data']['packages'];
+        } elseif (!empty($r['data']) && is_array($r['data'])) {
+            $pkgs = $r['data'];
+        } elseif (!empty($r['packages']) && is_array($r['packages'])) {
+            $pkgs = $r['packages'];
+        } elseif (!empty($r) && is_array($r)) {
+            foreach ($r as $item) {
+                if (is_array($item) && isset($item['name'])) { $pkgs = $r; break; }
             }
-            if (!empty($pkgs)) {
-                foreach (array_slice($pkgs, 0, 20) as $p) {
-                    if (!is_array($p)) continue;
-                    $pname = $p['name'] ?? '';
-                    $pcost = $p['cost'] ?? $p['price'] ?? '';
-                    $cid   = $p['company_id'] ?? ($p['company']['id'] ?? 0);
-                    $cname = $COMPANIES[$cid] ?? ($p['company']['name'] ?? '');
-                    $pgb   = $p['gb'] ?? $p['data'] ?? '';
-                    $extra = $pgb ? " | {$pgb}GB" : '';
-                    $packagesCtx .= "- {$pname}{$extra} | {$pcost} ש\"ח | {$cname}\n";
-                }
-            }
-            // אם עדיין ריק — שמור את ה-raw לדיבוג
-            if (empty($packagesCtx) && !empty($r)) {
-                $packagesCtx = "raw: ".json_encode($r, JSON_UNESCAPED_UNICODE);
+        }
+        if (!empty($pkgs)) {
+            foreach (array_slice($pkgs, 0, 30) as $p) {
+                if (!is_array($p)) continue;
+                $pname = $p['name'] ?? '';
+                $pcost = $p['cost'] ?? $p['price'] ?? '';
+                $cid   = $p['company_id'] ?? ($p['company']['id'] ?? 0);
+                $cname = $COMPANIES[$cid] ?? ($p['company']['name'] ?? '');
+                $pgb   = $p['gb'] ?? $p['data'] ?? '';
+                $extra = $pgb ? " | {$pgb}GB" : '';
+                $packagesCtx .= "- {$pname}{$extra} | {$pcost} ש\"ח | {$cname}\n";
             }
         }
 
