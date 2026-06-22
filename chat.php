@@ -154,13 +154,8 @@ if ($_SERVER['REQUEST_METHOD']==='POST') {
         if (!empty($pkgs)) {
             foreach (array_slice($pkgs, 0, 30) as $p) {
                 if (!is_array($p)) continue;
-                $pname = $p['name'] ?? '';
-                $pcost = $p['cost'] ?? $p['price'] ?? '';
-                $cid   = $p['company_id'] ?? ($p['company']['id'] ?? 0);
-                $cname = $COMPANIES[$cid] ?? ($p['company']['name'] ?? '');
-                $pgb   = $p['gb'] ?? $p['data'] ?? '';
-                $extra = $pgb ? " | {$pgb}GB" : '';
-                $packagesCtx .= "- {$pname}{$extra} | {$pcost} ש\"ח | {$cname}\n";
+                // שלח את כל השדות ל-Claude
+                $packagesCtx .= json_encode($p, JSON_UNESCAPED_UNICODE) . "\n";
             }
         }
 
