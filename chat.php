@@ -116,21 +116,19 @@ if ($_SERVER['REQUEST_METHOD']==='POST') {
         $name    = $user['name']  ?? 'חנות';
         $city    = $user['city']  ?? '';
 
-        // בדיקת מפעיל לפי מספר טלפון
+        // בדיקת מפעיל — אם יש מספר טלפון בהודעה, בדוק תמיד
         $providerCtx = '';
-        if (preg_match('/מפעיל|חברה|איזה חברה|באיזה חברה|לבדוק מספר|בדוק מספר/u', $text)) {
-            preg_match('/05\d{8}/', $text, $phoneMatch);
-            $checkPhone = $phoneMatch[0] ?? '';
-            if ($checkPhone) {
-                $pr = crmGet('checkProvider', ['phone'=>$checkPhone]);
-                if (!empty($pr['data'])) {
-                    $providerCtx = "=== בדיקת מפעיל למספר {$checkPhone} ===\n".json_encode($pr['data'], JSON_UNESCAPED_UNICODE)."\n";
-                } else {
-                    $providerCtx = "=== בדיקת מפעיל למספר {$checkPhone} ===\nלא נמצא מידע\n";
-                }
+        preg_match_all('/05\d{8}/', $text, $phoneMatches);
+        $phonesToCheck = array_unique($phoneMatches[0] ?? []);
+        foreach ($phonesToCheck as $checkPhone) {
+            $pr = crmGet('checkProvider', ['phone'=>$checkPhone]);
+            if (!empty($pr['data'])) {
+                $providerCtx .= "=== מפעיל למספר {$checkPhone} ===\n".json_encode($pr['data'], JSON_UNESCAPED_UNICODE)."\n";
+            } else {
+                $providerCtx .= "=== מפעיל למספר {$checkPhone} ===\nלא נמצא מידע\n";
             }
         }
-        if ($providerCtx) $system2 = $providerCtx;
+        $system2 = $providerCtx;
 
         // תמיד טוען חבילות — Claude יחליט מה רלוונטי
         $packagesCtx  = '';
