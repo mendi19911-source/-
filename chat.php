@@ -176,15 +176,18 @@ if ($_SERVER['REQUEST_METHOD']==='POST') {
         $system .= "2. כשנציג שואל על עסקה — תן סטטוס מיידי מה-CRM.\n";
         $system .= "3. כשנציג מבקש לזרז ('דחוף', 'הלקוח איתי') — הכר בדחיפות, תן סטטוס מיידי.\n";
         $system .= "4. מה הבוט יכול: בדיקת סטטוס עסקה, בדיקת מפעיל, הצגת חבילות ומחירים.\n";
-        $system .= "5. מה דורש נציג אנושי: הפעלת ניוד, החלפת SIM, עדכון אשראי, עקיפת ניוד, שחרור חסימה — אמור 'פנה לתפעול'.\n";
-        $system .= "6. הקמת עסקה חדשה — הנציג חייב להקים אותה במערכת CRM ישירות. אמור 'יש להקים עסקה במערכת'.\n";
-        $system .= "7. אם שולחים כמה מספרי טלפון לבדיקת מפעיל — בדוק כל אחד בנפרד.\n";
-        $system .= "8. סטטוסים: DONE=הושלם, WAITING_CONNECT=ממתין לחיבור, CONN_NOT_NIY=חובר אך ניוד לא הושלם, OPEN=פתוחה, NIYUD_ACTIVATED=ניוד יצא לדרך, CANCELLED=מבוטלת.\n";
-        $system .= "9. היה חברותי ונעים — אבל קצר. הנציגים עסוקים.\n";
-        $system .= "10. אם הנציג שאל על מספר טלפון ולא נמצאה עסקה במערכת — אמור 'המספר לא נמצא במערכת. האם תרצה שאבדוק באיזה חברה הוא נמצא?'.\n";
-        $system .= "10b. אם ביקשו בדיקת מפעיל — תוצאות הבדיקה מופיעות בהקשר. תרגם לעברית ברורה.\n";
-        $system .= "11. אל תציג JSON גולמי — תרגם תמיד לעברית.\n";
-        $system .= "12. עקוב אחרי הנציג — אם הוא מחליף נושא, עבור איתו מיד. אל תדבק בנושא הקודם.\n";
+        $system .= "5. סטטוסים: DONE=הושלם, WAITING_CONNECT=ממתין לחיבור, CONN_NOT_NIY=חובר אך ניוד לא הושלם, OPEN=פתוחה, NIYUD_ACTIVATED=ניוד יצא לדרך, CANCELLED=מבוטלת.\n";
+        $system .= "6. אם הנציג שאל על מספר טלפון ולא נמצאה עסקה במערכת — אמור 'המספר לא נמצא במערכת. האם תרצה שאבדוק באיזה חברה הוא נמצא?'.\n";
+        $system .= "7. אם ביקשו בדיקת מפעיל — תוצאות הבדיקה מופיעות בהקשר. תרגם לעברית ברורה.\n";
+        $system .= "8. אל תציג JSON גולמי — תרגם תמיד לעברית.\n";
+        $system .= "9. עקוב אחרי הנציג — אם הוא מחליף נושא, עבור איתו מיד.\n";
+        $system .= "\n=== העברה לנציג אנושי ===\n";
+        $system .= "כשאין לך מידע או שהפעולה דורשת נציג (ניוד, SIM, אשראי, חסימה וכו') — אל תשלח לחברות חיצוניות לעולם.\n";
+        $system .= "במקום זאת אמור: 'אין לי את המידע הזה. האם תרצה שאעביר אותך לנציג להמשך טיפול?'\n";
+        $system .= "אם הנציג אומר כן:\n";
+        $system .= "  - אם כבר ידוע מהשיחה על איזו חברה מדובר (סלקום/פרטנר/פלאפון/גולן/הוט/wecom) — כתוב בדיוק: [TRANSFER:שם_החברה]\n";
+        $system .= "  - אם לא ידוע — שאל: 'לנציג של איזו חברה תרצה להתחבר? סלקום / פרטנר / פלאפון / גולן / הוט / wecom'\n";
+        $system .= "  - אחרי שהנציג בוחר חברה — כתוב בדיוק: [TRANSFER:שם_החברה]\n";
 
         $messages = [];
         foreach ($history as $h) {
@@ -230,6 +233,7 @@ if ($_SERVER['REQUEST_METHOD']==='POST') {
   .input-bar textarea{flex:1;border:none;border-radius:20px;padding:10px 16px;font-size:14px;resize:none;outline:none;max-height:120px;font-family:Arial,sans-serif}
   .input-bar button{background:#075e54;color:#fff;border:none;border-radius:50%;width:46px;height:46px;font-size:20px;cursor:pointer;flex-shrink:0}
   .input-bar button:hover{background:#128c7e}
+  .bubble.transfer{background:#fff3cd;border:1px solid #ffc107;align-self:center;text-align:center;border-radius:8px;font-weight:bold;color:#856404}
 </style>
 </head>
 <body>
@@ -283,9 +287,22 @@ async function send() {
       body: JSON.stringify({phone, message: msg, history: history.slice(-10)})
     });
     const data = await res.json();
-    const reply = data.reply || 'אין תגובה';
-    addBubble(reply, 'bot');
-    history.push({role:'assistant', content: reply});
+    let reply = data.reply || 'אין תגובה';
+
+    // זיהוי העברה לנציג
+    const transferMatch = reply.match(/\[TRANSFER:([^\]]+)\]/);
+    if (transferMatch) {
+      const company = transferMatch[1];
+      reply = reply.replace(/\[TRANSFER:[^\]]+\]/, '').trim();
+      if (reply) addBubble(reply, 'bot');
+      addBubble('🔄 מעביר אותך לנציג ' + company + '...', 'transfer');
+      history.push({role:'assistant', content: reply + ' [TRANSFER:' + company + ']'});
+      // כאן בעתיד: קריאת API להעברה
+      // await fetch('/transfer', {method:'POST', body: JSON.stringify({phone, company})});
+    } else {
+      addBubble(reply, 'bot');
+      history.push({role:'assistant', content: reply});
+    }
   } catch(e) {
     addBubble('שגיאת תקשורת 😕', 'bot');
   }
