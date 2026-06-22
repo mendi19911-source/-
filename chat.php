@@ -116,16 +116,22 @@ if ($_SERVER['REQUEST_METHOD']==='POST') {
         $name    = $user['name']  ?? 'חנות';
         $city    = $user['city']  ?? '';
 
-        // בדיקת מפעיל — אם יש מספר טלפון בהודעה, בדוק תמיד
+        // זיהוי כוונה: האם הנציג מבקש בדיקת מפעיל במפורש?
+        $wantsProvider = preg_match('/מפעיל|באיזה חברה|איזה חברה|לבדוק חברה|בדוק חברה|לבדוק מפעיל|בדוק מפעיל/u', $text);
+
         $providerCtx = '';
         preg_match_all('/05\d{8}/', $text, $phoneMatches);
-        $phonesToCheck = array_unique($phoneMatches[0] ?? []);
-        foreach ($phonesToCheck as $checkPhone) {
-            $pr = crmGet('checkProvider', ['phone'=>$checkPhone]);
-            if (!empty($pr['data'])) {
-                $providerCtx .= "=== מפעיל למספר {$checkPhone} ===\n".json_encode($pr['data'], JSON_UNESCAPED_UNICODE)."\n";
-            } else {
-                $providerCtx .= "=== מפעיל למספר {$checkPhone} ===\nלא נמצא מידע\n";
+        $phonesInText = array_unique($phoneMatches[0] ?? []);
+
+        if ($wantsProvider && !empty($phonesInText)) {
+            // כוונה מפורשת לבדוק מפעיל — ישר checkProvider, בלי CRM
+            foreach ($phonesInText as $checkPhone) {
+                $pr = crmGet('checkProvider', ['phone'=>$checkPhone]);
+                if (!empty($pr['data'])) {
+                    $providerCtx .= "=== מפעיל למספר {$checkPhone} ===\n".json_encode($pr['data'], JSON_UNESCAPED_UNICODE)."\n";
+                } else {
+                    $providerCtx .= "=== מפעיל למספר {$checkPhone} ===\nלא נמצא מידע\n";
+                }
             }
         }
         $system2 = $providerCtx;
@@ -180,7 +186,8 @@ if ($_SERVER['REQUEST_METHOD']==='POST') {
         $system .= "7. אם שולחים כמה מספרי טלפון לבדיקת מפעיל — בדוק כל אחד בנפרד.\n";
         $system .= "8. סטטוסים: DONE=הושלם, WAITING_CONNECT=ממתין לחיבור, CONN_NOT_NIY=חובר אך ניוד לא הושלם, OPEN=פתוחה, NIYUD_ACTIVATED=ניוד יצא לדרך, CANCELLED=מבוטלת.\n";
         $system .= "9. היה חברותי ונעים — אבל קצר. הנציגים עסוקים.\n";
-        $system .= "10. אם אין מידע — בקש שם לקוח או מספר עסקה.\n";
+        $system .= "10. אם הנציג שאל על מספר טלפון ולא נמצאה עסקה במערכת — אמור 'המספר לא נמצא במערכת. האם תרצה שאבדוק באיזה חברה הוא נמצא?'.\n";
+        $system .= "10b. אם ביקשו בדיקת מפעיל — תוצאות הבדיקה מופיעות בהקשר. תרגם לעברית ברורה.\n";
         $system .= "11. אל תציג JSON גולמי — תרגם תמיד לעברית.\n";
         $system .= "12. עקוב אחרי הנציג — אם הוא מחליף נושא, עבור איתו מיד. אל תדבק בנושא הקודם.\n";
 
