@@ -11,14 +11,14 @@ define('CLAUDE_MODEL','claude-haiku-4-5-20251001');
 
 $COMPANIES = [1=>'סלקום',2=>'פרטנר',4=>'פלאפון',5=>'גולן טלקום',6=>'הוט מובייל',12=>'wecom'];
 $STATUSES  = [
-    'OPEN'=>'פתוחה — טרם טופלה',
-    'PROCESS_SHOP'=>'דורש טיפול מהחנות',
-    'WAITING_CONNECT'=>'ממתין לחיבור',
-    'CONN_NOT_NIY'=>'חובר — הניוד לא הושלם',
-    'NIYUD_ACTIVATED'=>'הניוד יצא לדרך',
-    'DONE'=>'הושלמה בהצלחה',
-    'CANCELLED'=>'מבוטלת',
-    'ROBOT_ERROR_SYS'=>'שגיאת מערכת',
+    'OPEN'            => 'פתוחה — טרם טופלה',
+    'PROCESS_SHOP'    => 'דורש טיפול מהחנות — הנציג צריך להיכנס לעסקה ולראות מה המצב',
+    'WAITING_CONNECT' => 'ממתין לחיבור',
+    'CONN_NOT_NIY'    => 'חובר — ממתין לאישור ניוד מהלקוח. הלקוח צריך לאשר את הניוד, ברגע שיאשר העסקה תתקדם',
+    'NIYUD_ACTIVATED' => 'הניוד יצא לדרך — הקו בתהליך ניוד, עד 20 דקות הוא ינויד',
+    'DONE'            => 'הושלמה בהצלחה — הקו כבר אמור לעבוד',
+    'CANCELLED'       => 'מבוטלת',
+    'ROBOT_ERROR_SYS' => 'שגיאת מערכת — פנה לתפעול',
 ];
 
 function crmGet($endpoint, $extra=[]) {
@@ -116,6 +116,25 @@ if ($_SERVER['REQUEST_METHOD']==='POST') {
         $name    = $user['name']  ?? 'חנות';
         $city    = $user['city']  ?? '';
 
+        // קריאת הערות פתוחות לעסקאות (אם יש API)
+        $notesCtx = '';
+        foreach ($deals as $d) {
+            $dealId = $d['id'] ?? null;
+            if ($dealId) {
+                $nr = crmGet('getDealNotes', ['deal_id'=>$dealId]);
+                if (!empty($nr['data']) && is_array($nr['data'])) {
+                    foreach ($nr['data'] as $note) {
+                        $noteText = $note['text'] ?? $note['content'] ?? '';
+                        $noteBy   = $note['agent'] ?? $note['created_by'] ?? '';
+                        $noteDate = substr($note['created_at'] ?? '', 0, 10);
+                        if ($noteText) {
+                            $notesCtx .= "עסקה #{$dealId} — הערה ({$noteDate} {$noteBy}): {$noteText}\n";
+                        }
+                    }
+                }
+            }
+        }
+
         // זיהוי כוונה: האם הנציג מבקש בדיקת מפעיל במפורש?
         $wantsProvider = preg_match('/מפעיל|באיזה חברה|איזה חברה|לבדוק חברה|בדוק חברה|לבדוק מפעיל|בדוק מפעיל/u', $text);
 
@@ -169,6 +188,7 @@ if ($_SERVER['REQUEST_METHOD']==='POST') {
         $system .= "הנציג שואל שאלות תפעוליות: סטטוס עסקה, בדיקת מפעיל, מחירי חבילות.\n";
         $system .= "לקוחות קצה אינם מתכתבים כאן ואינם מקבלים שירות דרך בוט זה.\n\n";
         $system .= "=== עסקאות החנות ===\n{$dealsCtx}\n";
+        if ($notesCtx) $system .= "=== הערות פתוחות בעסקאות ===\n{$notesCtx}\n";
         if ($packagesCtx) $system .= "=== חבילות זמינות ===\n{$packagesCtx}\n";
         if (!empty($system2)) $system .= "\n".$system2;
         $system .= "\n=== כללי תגובה ===\n";
