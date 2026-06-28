@@ -158,8 +158,27 @@ if ($_SERVER['REQUEST_METHOD']==='POST') {
         preg_match_all('/05\d{8}/', $text, $phoneMatches);
         $phonesInText = array_unique($phoneMatches[0] ?? []);
 
-        if ($wantsProvider && !empty($phonesInText)) {
-            // כוונה מפורשת לבדוק מפעיל — ישר checkProvider, בלי CRM
+        // בדיקת מפעיל: אם ביקש מפורשות — תמיד בדוק. אם לא ביקש אך יש מספר — בדוק אם לא נמצאה עסקה
+        $shouldCheckProvider = $wantsProvider && !empty($phonesInText);
+
+        if (!$shouldCheckProvider && !empty($phonesInText)) {
+            // יש מספרי טלפון בהודעה — בדוק אם אף אחד מהם לא מופיע בעסקאות הקיימות
+            $dealPhones = [];
+            foreach ($deals as $d) {
+                if (!empty($d['cphone1'])) $dealPhones[] = preg_replace('/\D/', '', $d['cphone1']);
+                foreach (($d['details'] ?? []) as $det) {
+                    if (!empty($det['tel_number'])) $dealPhones[] = preg_replace('/\D/', '', $det['tel_number']);
+                }
+            }
+            foreach ($phonesInText as $checkPhone) {
+                if (!in_array($checkPhone, $dealPhones, true)) {
+                    $shouldCheckProvider = true;
+                    break;
+                }
+            }
+        }
+
+        if ($shouldCheckProvider && !empty($phonesInText)) {
             foreach ($phonesInText as $checkPhone) {
                 $pr = crmGet('checkProvider', ['phone'=>$checkPhone]);
                 if (!empty($pr['data'])) {
@@ -234,8 +253,8 @@ if ($_SERVER['REQUEST_METHOD']==='POST') {
         $system .= "3. כשנציג מבקש לזרז ('דחוף', 'הלקוח איתי') — הכר בדחיפות, תן סטטוס מיידי.\n";
         $system .= "4. מה הבוט יכול: בדיקת סטטוס עסקה, בדיקת מפעיל, הצגת חבילות ומחירים.\n";
         $system .= "5. סטטוסים: DONE=הושלם, WAITING_CONNECT=ממתין לחיבור, CONN_NOT_NIY=חובר אך ניוד לא הושלם, OPEN=פתוחה, NIYUD_ACTIVATED=ניוד יצא לדרך, CANCELLED=מבוטלת.\n";
-        $system .= "6. אם הנציג שאל על מספר טלפון ולא נמצאה עסקה במערכת — אמור 'המספר לא נמצא במערכת. האם תרצה שאבדוק באיזה חברה הוא נמצא?'.\n";
-        $system .= "7. אם ביקשו בדיקת מפעיל — תוצאות הבדיקה מופיעות בהקשר. תרגם לעברית ברורה.\n";
+        $system .= "6. אם נשלח מספר טלפון ולא נמצאה עסקה — בדיקת המפעיל בוצעה אוטומטית ותוצאותיה מופיעות בהקשר. הצג אותן ישירות ללא שאלות.\n";
+        $system .= "7. תוצאות בדיקת מפעיל מופיעות בהקשר תחת '=== מפעיל למספר XXXXX ===' — תרגם לעברית ברורה ופשוטה.\n";
         $system .= "8. אל תציג JSON גולמי — תרגם תמיד לעברית.\n";
         $system .= "9. עקוב אחרי הנציג — אם הוא מחליף נושא, עבור איתו מיד.\n";
         $system .= "\n=== מידע מקצועי — נהלים ועלויות ===\n";
