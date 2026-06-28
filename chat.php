@@ -113,8 +113,24 @@ if ($_SERVER['REQUEST_METHOD']==='POST') {
         $data    = $resp['data'];
         $user    = $data['user']  ?? [];
         $deals   = $data['deals'] ?? [];
+        $shopId  = $user['id']    ?? null;
         $name    = $user['name']  ?? 'חנות';
         $city    = $user['city']  ?? '';
+
+        // חיפוש עסקאות לפי טקסט חופשי (שם / מספר עסקה)
+        if ($shopId && mb_strlen($text, 'UTF-8') > 2) {
+            $searchResp = crmGet('deals', ['id'=>$shopId, 'q'=>$text]);
+            if (!empty($searchResp['data']) && is_array($searchResp['data'])) {
+                $searchDeals = $searchResp['data'];
+                // מיזוג — הוסף עסקאות שלא קיימות עדיין לפי ID
+                $existingIds = array_column($deals, 'id');
+                foreach ($searchDeals as $sd) {
+                    if (!in_array($sd['id'] ?? null, $existingIds, true)) {
+                        $deals[] = $sd;
+                    }
+                }
+            }
+        }
 
         // קריאת הערות פתוחות לעסקאות (אם יש API)
         $notesCtx = '';
@@ -158,6 +174,7 @@ if ($_SERVER['REQUEST_METHOD']==='POST') {
         // תמיד טוען חבילות — Claude יחליט מה רלוונטי
         $packagesCtx  = '';
         $r = crmGet('get-packages');
+        $bizR = crmGet('packagesByBiz');
         $pkgs = [];
         if (!empty($r['data']['packages']) && is_array($r['data']['packages'])) {
             $pkgs = $r['data']['packages'];
@@ -170,10 +187,30 @@ if ($_SERVER['REQUEST_METHOD']==='POST') {
                 if (is_array($item) && isset($item['name'])) { $pkgs = $r; break; }
             }
         }
+        // מיזוג חבילות packagesByBiz לפי ID
+        $bizPkgs = [];
+        if (!empty($bizR['data']) && is_array($bizR['data'])) {
+            $bizPkgs = $bizR['data'];
+        } elseif (!empty($bizR['packages']) && is_array($bizR['packages'])) {
+            $bizPkgs = $bizR['packages'];
+        } elseif (!empty($bizR) && is_array($bizR)) {
+            foreach ($bizR as $item) {
+                if (is_array($item) && isset($item['name'])) { $bizPkgs = $bizR; break; }
+            }
+        }
+        foreach ($bizPkgs as $bp) {
+            if (!is_array($bp)) continue;
+            $bpId = $bp['id'] ?? null;
+            if ($bpId && !in_array($bpId, array_column($pkgs, 'id'), true)) {
+                $pkgs[] = $bp;
+            } elseif (!$bpId) {
+                $pkgs[] = $bp;
+            }
+        }
+
         if (!empty($pkgs)) {
-            foreach (array_slice($pkgs, 0, 30) as $p) {
+            foreach (array_slice($pkgs, 0, 50) as $p) {
                 if (!is_array($p)) continue;
-                // שלח את כל השדות ל-Claude
                 $packagesCtx .= json_encode($p, JSON_UNESCAPED_UNICODE) . "\n";
             }
         }
