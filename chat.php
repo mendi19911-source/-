@@ -4,10 +4,29 @@ error_reporting(E_ALL);
 ini_set('display_errors', 0);
 ini_set('log_errors', 1);
 
-define('CRM_BASE',    'https://crm.ideali.co.il/api/aibot');
-define('CRM_TOKEN',   'jkFGD78dfgDj8797gsjkh8fdgdf');
-define('CLAUDE_KEY',  implode('', ['sk-ant-api03-bAWcn9HGKOd-EVNzLiotPxWvTPxKmn9', 'WCnqkhqB6BOvqojXJOCPtDUVoCpqEy4VWCJjbVEpZV8IwcqSmPpRqng-3SpDHQAA']));
-define('CLAUDE_MODEL','claude-haiku-4-5-20251001');
+// Load .env if present (local/dev). In production the platform should inject real env vars.
+if (file_exists(__DIR__.'/.env')) {
+    foreach (file(__DIR__.'/.env', FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) as $line) {
+        if ($line[0] === '#' || strpos($line, '=') === false) continue;
+        [$k, $v] = explode('=', $line, 2);
+        putenv(trim($k).'='.trim($v));
+    }
+}
+
+function requireEnv($name) {
+    $v = getenv($name);
+    if ($v === false || $v === '') {
+        http_response_code(500);
+        error_log("Missing required environment variable: $name");
+        die(json_encode(['error' => "Server misconfigured: missing $name"]));
+    }
+    return $v;
+}
+
+define('CRM_BASE',    getenv('CRM_BASE') ?: 'https://crm.ideali.co.il/api/aibot');
+define('CRM_TOKEN',   requireEnv('CRM_TOKEN'));
+define('CLAUDE_KEY',  requireEnv('CLAUDE_KEY'));
+define('CLAUDE_MODEL', getenv('CLAUDE_MODEL') ?: 'claude-haiku-4-5-20251001');
 
 $COMPANIES = [1=>'סלקום',2=>'פרטנר',4=>'פלאפון',5=>'גולן טלקום',6=>'הוט מובייל',12=>'wecom'];
 $STATUSES  = [
