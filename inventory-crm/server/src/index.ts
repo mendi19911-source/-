@@ -11,6 +11,8 @@ import stockRoutes from "./routes/stock";
 import dashboardRoutes from "./routes/dashboard";
 import settingsRoutes from "./routes/settings";
 import importRoutes from "./routes/importCsv";
+import taskRoutes from "./routes/tasks";
+import employeeRoutes from "./routes/employees";
 import { requireAuth } from "./middleware/auth";
 
 const app = express();
@@ -47,6 +49,8 @@ app.use("/api/stock", stockRoutes);
 app.use("/api/dashboard", dashboardRoutes);
 app.use("/api/settings", settingsRoutes);
 app.use("/api/import", importRoutes);
+app.use("/api/tasks", taskRoutes);
+app.use("/api/employees", employeeRoutes);
 
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {

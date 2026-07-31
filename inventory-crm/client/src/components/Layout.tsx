@@ -3,6 +3,7 @@ import { useAuth } from "../AuthContext";
 
 const links = [
   { to: "/", label: "דשבורד", end: true },
+  { to: "/tasks", label: "לוח משימות" },
   { to: "/products", label: "מוצרים" },
   { to: "/brands", label: "מותגים" },
   { to: "/categories", label: "קטגוריות" },

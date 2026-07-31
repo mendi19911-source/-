@@ -51,6 +51,29 @@ async function main() {
     });
   }
 
+  const existingEmployees = await prisma.employee.count();
+  if (existingEmployees === 0) {
+    const [dana, yossi, michal] = await Promise.all([
+      prisma.employee.create({ data: { name: "דנה כהן", role: "מוכרת" } }),
+      prisma.employee.create({ data: { name: "יוסי לוי", role: "מחסנאי" } }),
+      prisma.employee.create({ data: { name: "מיכל אברהם", role: "מנהלת חנות" } }),
+    ]);
+
+    const tomorrow = new Date(Date.now() + 24 * 60 * 60 * 1000);
+    const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    const nextWeek = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+
+    await prisma.task.createMany({
+      data: [
+        { title: "ספירת מלאי לקטגוריית עיצוב שיער", status: "todo", priority: "high", assigneeId: yossi.id, dueDate: tomorrow, position: 0 },
+        { title: "לעדכן תמונות מוצר לשמפו הידרציה", status: "todo", priority: "low", assigneeId: dana.id, position: 1 },
+        { title: "לבדוק הזמנה חדשה מספק Qarnette", status: "in_progress", priority: "medium", assigneeId: michal.id, dueDate: nextWeek, position: 0 },
+        { title: "להשלים מחירי עלות למוצרים שיובאו", status: "in_progress", priority: "high", assigneeId: yossi.id, dueDate: yesterday, position: 1 },
+        { title: "סידור מדפי תצוגה בכניסה לחנות", status: "done", priority: "medium", assigneeId: dana.id, completedAt: new Date(), position: 0 },
+      ],
+    });
+  }
+
   console.log("Seed complete.");
 }
 

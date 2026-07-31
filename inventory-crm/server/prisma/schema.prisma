@@ -145,6 +145,35 @@ model Settings {
   @@map("settings")
 }
 
+model Employee {
+  id        Int      @id @default(autoincrement())
+  name      String
+  role      String? // תפקיד, למשל: "מוכר/ת", "מחסנאי/ת"
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  tasks     Task[]
+
+  @@map("employees")
+}
+
+model Task {
+  id          Int       @id @default(autoincrement())
+  title       String
+  description String?
+  status      String    @default("todo") // 'todo' | 'in_progress' | 'done'
+  priority    String    @default("medium") // 'low' | 'medium' | 'high'
+  dueDate     DateTime?
+  assigneeId  Int?
+  assignee    Employee? @relation(fields: [assigneeId], references: [id])
+  position    Int       @default(0) // manual ordering within a status column
+  completedAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@map("tasks")
+}
+
 // --- Phase 2 (business customers / tiered pricing) — reserved, not built yet ---
 // model BusinessCustomer { businessName, contactName, phone, address, tierId -> CustomerPriceTier }
 // model CustomerPriceTier { name, discountPercent, categoryDiscounts (json) }

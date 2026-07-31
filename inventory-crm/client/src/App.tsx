@@ -3,6 +3,7 @@ import { AuthProvider, useAuth } from "./AuthContext";
 import Layout from "./components/Layout";
 import Login from "./pages/Login";
 import Dashboard from "./pages/Dashboard";
+import Tasks from "./pages/Tasks";
 import Products from "./pages/Products";
 import ProductDetail from "./pages/ProductDetail";
 import Brands from "./pages/Brands";
@@ -30,6 +31,7 @@ function AppRoutes() {
         }
       >
         <Route path="/" element={<Dashboard />} />
+        <Route path="/tasks" element={<Tasks />} />
         <Route path="/products" element={<Products />} />
         <Route path="/products/:id" element={<ProductDetail />} />
         <Route path="/brands" element={<Brands />} />

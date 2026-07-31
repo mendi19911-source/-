@@ -111,3 +111,52 @@ export const SOURCE_STORE_LABELS: Record<string, string> = {
   tiktak: "TikTak Beauty",
   other: "אחר",
 };
+
+export interface Employee {
+  id: number;
+  name: string;
+  role: string | null;
+  isActive: boolean;
+  _count?: { tasks: number };
+}
+
+export type TaskStatus = "todo" | "in_progress" | "done";
+export type TaskPriority = "low" | "medium" | "high";
+
+export interface Task {
+  id: number;
+  title: string;
+  description: string | null;
+  status: TaskStatus;
+  priority: TaskPriority;
+  dueDate: string | null;
+  assigneeId: number | null;
+  assignee: Employee | null;
+  position: number;
+  completedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface TaskSummary {
+  total: number;
+  todo: number;
+  inProgress: number;
+  done: number;
+  overdue: number;
+  dueToday: number;
+  highPriorityOpen: number;
+  completedToday: number;
+}
+
+export const TASK_STATUS_LABELS: Record<TaskStatus, string> = {
+  todo: "לביצוע",
+  in_progress: "בתהליך",
+  done: "הושלם",
+};
+
+export const TASK_PRIORITY_LABELS: Record<TaskPriority, string> = {
+  low: "נמוכה",
+  medium: "בינונית",
+  high: "גבוהה",
+};

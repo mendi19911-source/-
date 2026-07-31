@@ -11,3 +11,9 @@ export const PRICE_FIELDS = ["cost_price", "retail_price"] as const;
 export type PriceField = (typeof PRICE_FIELDS)[number];
 
 export const LOW_MARGIN_THRESHOLD_PERCENT = 20;
+
+export const TASK_STATUSES = ["todo", "in_progress", "done"] as const;
+export type TaskStatus = (typeof TASK_STATUSES)[number];
+
+export const TASK_PRIORITIES = ["low", "medium", "high"] as const;
+export type TaskPriority = (typeof TASK_PRIORITIES)[number];
