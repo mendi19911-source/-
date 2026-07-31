@@ -1,0 +1,152 @@
+// Inventory CRM - Phase 1 data model
+// Dev DB is SQLite for fast local prototyping. To move to Postgres:
+//   1. change provider below to "postgresql"
+//   2. set DATABASE_URL to a postgres connection string
+//   3. consider switching money fields from Float to Decimal(10,2) for exact precision
+//
+// SQLite has no native enum type, so enum-like fields are plain strings;
+// allowed values are validated in the API layer (see src/lib/enums.ts).
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           Int       @id @default(autoincrement())
+  username     String    @unique
+  passwordHash String
+  role         String    @default("admin") // reserved for future roles/permissions
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  stockMovements StockMovement[]
+
+  @@map("users")
+}
+
+model Brand {
+  id          Int       @id @default(autoincrement())
+  name        String    @unique
+  logoUrl     String?
+  sourceStore String? // 'qarnette' | 'tiktak' | 'other'
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  products    Product[]
+
+  @@map("brands")
+}
+
+model Category {
+  id        Int        @id @default(autoincrement())
+  name      String
+  parentId  Int?
+  parent    Category?  @relation("CategoryTree", fields: [parentId], references: [id])
+  children  Category[] @relation("CategoryTree")
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+  products  Product[]
+
+  @@map("categories")
+}
+
+model Supplier {
+  id          Int              @id @default(autoincrement())
+  name        String
+  contactName String?
+  phone       String?
+  email       String?
+  notes       String?
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+  variants    ProductVariant[]
+
+  @@map("suppliers")
+}
+
+model Product {
+  id           Int              @id @default(autoincrement())
+  name         String
+  brandId      Int
+  brand        Brand            @relation(fields: [brandId], references: [id])
+  categoryId   Int
+  category     Category         @relation(fields: [categoryId], references: [id])
+  description  String?
+  hairTypeTags String? // JSON-encoded string[], e.g. ["דק","מתולתל"]
+  sourceStore  String // 'qarnette' | 'tiktak' | 'other'
+  sourceUrl    String?
+  status       String           @default("active") // 'active' | 'archived'
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
+  variants     ProductVariant[]
+
+  @@map("products")
+}
+
+model ProductVariant {
+  id                Int             @id @default(autoincrement())
+  productId         Int
+  product           Product         @relation(fields: [productId], references: [id], onDelete: Cascade)
+  sku               String          @unique
+  variantName       String
+  attributeType     String? // 'גודל' | 'צבע' | 'אחר'
+  barcode           String?
+  costPricePreVat    Float?
+  retailPrice        Float? // includes VAT, as shown on the storefront
+  currentStockQty    Int             @default(0)
+  lowStockThreshold  Int             @default(5)
+  supplierId         Int?
+  supplier           Supplier?       @relation(fields: [supplierId], references: [id])
+  imageUrl           String?
+  isActive           Boolean         @default(true)
+  createdAt          DateTime        @default(now())
+  updatedAt           DateTime        @updatedAt
+  stockMovements      StockMovement[]
+  priceHistory        PriceHistory[]
+
+  @@map("product_variants")
+}
+
+model StockMovement {
+  id            Int             @id @default(autoincrement())
+  variantId     Int
+  variant       ProductVariant  @relation(fields: [variantId], references: [id], onDelete: Cascade)
+  movementType  String // 'in' | 'out' | 'adjustment'
+  quantity      Int // signed delta applied to stock
+  reason        String?
+  createdById   Int?
+  createdBy     User?           @relation(fields: [createdById], references: [id])
+  createdAt     DateTime        @default(now())
+
+  @@map("stock_movements")
+}
+
+model PriceHistory {
+  id           Int            @id @default(autoincrement())
+  variantId    Int
+  variant      ProductVariant @relation(fields: [variantId], references: [id], onDelete: Cascade)
+  fieldChanged String // 'cost_price' | 'retail_price'
+  oldValue     Float?
+  newValue     Float?
+  changedAt    DateTime       @default(now())
+
+  @@map("price_history")
+}
+
+model Settings {
+  id        Int      @id @default(autoincrement())
+  vatRate   Float    @default(0.18)
+  currency  String   @default("ILS")
+  updatedAt DateTime @updatedAt
+
+  @@map("settings")
+}
+
+// --- Phase 2 (business customers / tiered pricing) — reserved, not built yet ---
+// model BusinessCustomer { businessName, contactName, phone, address, tierId -> CustomerPriceTier }
+// model CustomerPriceTier { name, discountPercent, categoryDiscounts (json) }
+// model CustomerProductPrice { customerId, productId/categoryId, price } -- overrides tier price
+// Price resolution order when built: customer-specific > tier price > catalog retail price.
